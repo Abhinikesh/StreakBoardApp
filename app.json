@@ -3,6 +3,7 @@
     "name": "StreakBoardApp",
     "slug": "StreakBoardApp",
     "version": "1.0.0",
+    "scheme": "streakboard",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -20,10 +21,20 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.abhinikesh.streakboard"
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-web-browser"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "27a962d0-6352-42db-b556-f10ad839f899"
+      }
     }
   }
 }
