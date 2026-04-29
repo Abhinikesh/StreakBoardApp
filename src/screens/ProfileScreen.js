@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, TextInput,
-  StyleSheet, ActivityIndicator, SafeAreaView, StatusBar,
+  View, Text, Image, ScrollView, TouchableOpacity, TextInput,
+  StyleSheet, ActivityIndicator, StatusBar,
   Alert, Switch, Share,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import * as ImagePicker from 'expo-image-picker';
 import * as SecureStore from 'expo-secure-store';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -38,19 +40,21 @@ export default function ProfileScreen({ navigation }) {
   const { colors, isDark, toggleTheme } = useTheme();
   const s = makeStyles(colors);
 
-  const [profile,        setProfile]        = useState({ name: '', email: '', createdAt: '' });
-  const [shareData,      setShareData]      = useState({ shareCode: '', shareUrl: '' });
-  const [loading,        setLoading]        = useState(true);
-  const [saving,         setSaving]         = useState(false);
-  const [editMode,       setEditMode]       = useState(false);
-  const [editName,       setEditName]       = useState('');
-  const [nameFocused,    setNameFocused]    = useState(false);
-  const [stats,          setStats]          = useState({ habits: 0, totalDone: 0, bestStreak: 0 });
-  const [notifEnabled,   setNotifEnabled]   = useState(false);
-  const [reminderTime,   setReminderTime]   = useState('20:00');
-  const [soundEnabled,   setSoundEnabled]   = useState(false);
-  const [copyText,       setCopyText]       = useState('Copy');
-  const [savingReminder, setSavingReminder] = useState(false);
+  const [profile,          setProfile]          = useState({ name: '', email: '', createdAt: '', avatar: '' });
+  const [shareData,        setShareData]        = useState({ shareCode: '', shareUrl: '' });
+  const [loading,          setLoading]          = useState(true);
+  const [saving,           setSaving]           = useState(false);
+  const [editMode,         setEditMode]         = useState(false);
+  const [editName,         setEditName]         = useState('');
+  const [nameFocused,      setNameFocused]      = useState(false);
+  const [stats,            setStats]            = useState({ habits: 0, totalDone: 0, bestStreak: 0 });
+  const [notifEnabled,     setNotifEnabled]     = useState(false);
+  const [reminderTime,     setReminderTime]     = useState('20:00');
+  const [soundEnabled,     setSoundEnabled]     = useState(false);
+  const [copyText,         setCopyText]         = useState('Copy');
+  const [savingReminder,   setSavingReminder]   = useState(false);
+  const [avatarUri,        setAvatarUri]        = useState(null);
+  const [uploadingAvatar,  setUploadingAvatar]  = useState(false);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -63,6 +67,7 @@ export default function ProfileScreen({ navigation }) {
       const p = profileRes.data || {};
       setProfile(p);
       setEditName(p.name || '');
+      if (p.avatar) setAvatarUri(p.avatar);
       setShareData(shareRes.data || {});
 
       const remSettings = await getReminderSettings();
@@ -164,6 +169,59 @@ export default function ProfileScreen({ navigation }) {
     ]);
   }, [navigation]);
 
+  // ── Avatar picker & upload ────────────────────────────────────────────────
+  const handlePickAvatar = useCallback(async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Allow photo access to change your avatar');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
+      });
+      if (result.canceled) return;
+      const localUri = result.assets[0].uri;
+      setAvatarUri(localUri);
+      await uploadAvatar(localUri);
+    } catch (e) {
+      Alert.alert('Error', 'Could not pick image.');
+    }
+  }, []);
+
+  const uploadAvatar = async (uri) => {
+    setUploadingAvatar(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', { uri, type: 'image/jpeg', name: 'avatar.jpg' });
+      formData.append('upload_preset', 'streakboard_avatars');
+      formData.append('folder', 'avatars');
+
+      // ⚠️ Replace YOUR_CLOUD_NAME with your actual Cloudinary cloud name
+      const cloudName = 'YOUR_CLOUD_NAME';
+      const response = await fetch(
+        `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
+        { method: 'POST', body: formData, headers: { 'Content-Type': 'multipart/form-data' } },
+      );
+      const data = await response.json();
+      if (data.secure_url) {
+        await api.put('/api/auth/me', { avatar: data.secure_url });
+        setAvatarUri(data.secure_url);
+        Alert.alert('✅ Updated!', 'Profile photo saved');
+      } else {
+        throw new Error('Upload failed');
+      }
+    } catch (e) {
+      Alert.alert('Upload failed', 'Could not save photo. Check Cloudinary setup.');
+      console.error('avatar upload error:', e);
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
   const avatarBg   = getAvatarColor(profile.name);
   const initial    = profile.name ? profile.name[0].toUpperCase() : '?';
   const memberSince = profile.createdAt
@@ -176,16 +234,39 @@ export default function ProfileScreen({ navigation }) {
   }
 
   return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={s.safe} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
       <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled">
 
         {/* Avatar + name */}
         <View style={s.avatarSection}>
-          <View style={[s.avatarCircle, { backgroundColor: avatarBg }]}>
-            <Text style={s.avatarText}>{initial}</Text>
-          </View>
+          {/* Tappable avatar — shows photo or initial */}
+          <TouchableOpacity
+            onPress={handlePickAvatar}
+            style={s.avatarWrapper}
+            activeOpacity={0.8}
+          >
+            {avatarUri ? (
+              <Image source={{ uri: avatarUri }} style={s.avatarImage} />
+            ) : (
+              <View style={[s.avatarCircle, { backgroundColor: avatarBg }]}>
+                <Text style={s.avatarText}>{initial}</Text>
+              </View>
+            )}
+
+            {/* Camera badge */}
+            <View style={s.cameraBadge}>
+              <Text style={s.cameraIcon}>📷</Text>
+            </View>
+
+            {/* Upload loading overlay */}
+            {uploadingAvatar && (
+              <View style={s.avatarLoading}>
+                <ActivityIndicator color="#ffffff" size="small" />
+              </View>
+            )}
+          </TouchableOpacity>
 
           {editMode ? (
             <View style={s.editRow}>
@@ -389,8 +470,40 @@ const makeStyles = (colors) => StyleSheet.create({
   content: { paddingHorizontal: 20, paddingBottom: 120, paddingTop: 24 },
 
   avatarSection: { alignItems: 'center', marginBottom: 20 },
-  avatarCircle:  { width: 90, height: 90, borderRadius: 45, alignItems: 'center', justifyContent: 'center', marginTop: 20, marginBottom: 12 },
+
+  // Tappable avatar wrapper
+  avatarWrapper: {
+    width: 90, height: 90, borderRadius: 45,
+    alignSelf: 'center',
+    marginTop: 20, marginBottom: 12,
+    position: 'relative',
+  },
+  avatarImage: {
+    width: 90, height: 90, borderRadius: 45,
+  },
+  avatarCircle: {
+    width: 90, height: 90, borderRadius: 45,
+    alignItems: 'center', justifyContent: 'center',
+  },
   avatarText:    { color: '#ffffff', fontSize: 36, fontWeight: '700' },
+
+  // Camera badge overlay
+  cameraBadge: {
+    position: 'absolute', bottom: 0, right: 0,
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: colors.primary,
+    justifyContent: 'center', alignItems: 'center',
+    borderWidth: 2, borderColor: colors.bg,
+  },
+  cameraIcon: { fontSize: 13 },
+
+  // Upload loading overlay
+  avatarLoading: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    borderRadius: 45,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center', alignItems: 'center',
+  },
   nameRow:       { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
   profileName:   { color: colors.textPrimary, fontSize: 22, fontWeight: '700' },
   editIcon:      { padding: 4 },

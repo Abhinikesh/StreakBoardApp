@@ -1,9 +1,12 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
   Modal, Alert, ActivityIndicator, StyleSheet,
-  SafeAreaView, StatusBar,
+  StatusBar, Share,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import ViewShot from 'react-native-view-shot';
+import * as MediaLibrary from 'expo-media-library';
 import api from '../lib/axios';
 import { useTheme } from '../context/ThemeContext';
 
@@ -82,6 +85,7 @@ function formatDayLabel(dateStr) {
 export default function CalendarScreen({ navigation, route }) {
   const { colors } = useTheme();
   const s = makeStyles(colors);
+  const calendarRef = useRef(null);
 
   const routeParams = (route && route.params) || {};
   const preselectedId = routeParams.habitId || null;
@@ -151,6 +155,7 @@ export default function CalendarScreen({ navigation, route }) {
   }, [isCurrentMonth]);
 
   const selectedDayLog = logs.find((l) => l.date === selectedDay) || null;
+  const selectedHabit  = habits.find((h) => h._id === selectedHabitId) || null;
 
   const handleDayLog = useCallback(async (status) => {
     if (!selectedHabitId || !selectedDay) return;
@@ -173,6 +178,45 @@ export default function CalendarScreen({ navigation, route }) {
     }
   }, [selectedHabitId, selectedDay, selectedDayLog, fetchLogs]);
 
+  // ── Share handler ─────────────────────────────────────────────────────────
+  const handleShare = useCallback(async () => {
+    try {
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      const uri = await calendarRef.current.capture();
+
+      Alert.alert(
+        'Share your streak 🔥',
+        'What would you like to do?',
+        [
+          {
+            text: '📱 Share to WhatsApp / Instagram',
+            onPress: async () => {
+              await Share.share({
+                url: uri,
+                message: `My ${selectedHabit?.name} streak on StreakBoard! 🔥 Track yours at streak-o.vercel.app`,
+              });
+            },
+          },
+          {
+            text: '💾 Save to Gallery',
+            onPress: async () => {
+              if (status === 'granted') {
+                await MediaLibrary.saveToLibraryAsync(uri);
+                Alert.alert('✅ Saved!', 'Calendar saved to your gallery');
+              } else {
+                Alert.alert('Permission needed', 'Allow gallery access to save image');
+              }
+            },
+          },
+          { text: 'Cancel', style: 'cancel' },
+        ],
+      );
+    } catch (e) {
+      Alert.alert('Error', 'Could not capture calendar. Try again.');
+      console.error('share error:', e);
+    }
+  }, [selectedHabit]);
+
   const year      = currentMonth.getFullYear();
   const monthIdx  = currentMonth.getMonth();
   const cells     = buildCalendarDays(year, monthIdx, logs);
@@ -184,8 +228,45 @@ export default function CalendarScreen({ navigation, route }) {
   const bestStreak = computeBestStreak(logs);
   const monthTitle = currentMonth.toLocaleString('default', { month: 'long', year: 'numeric' });
 
+  // Render calendar cell
+  const renderCell = (cell) => {
+    if (cell.empty) return <View key={cell.key} style={s.cellEmpty} />;
+    const { day, log, isToday, isFuture, dateStr } = cell;
+    const isDone   = log?.status === 'done';
+    const isMissed = log?.status === 'missed';
+    let bg = 'transparent';
+    if (isDone)        bg = colors.success;
+    else if (isMissed) bg = colors.danger;
+    else if (!isFuture) bg = colors.border;
+    const todayBorder = isToday && !log;
+    const todayRing   = isToday && (isDone || isMissed);
+    let txtColor = colors.borderHover;
+    if (isDone || isMissed)  txtColor = colors.textPrimary;
+    else if (isToday)        txtColor = colors.primary;
+    else if (!isFuture)      txtColor = colors.textMuted;
+    return (
+      <TouchableOpacity
+        key={cell.key}
+        style={[
+          s.cell,
+          { backgroundColor: bg },
+          todayBorder && s.cellTodayBorder,
+          todayRing   && s.cellTodayRing,
+        ]}
+        activeOpacity={isFuture ? 1 : 0.7}
+        disabled={isFuture}
+        onPress={() => { setSelectedDay(dateStr); setShowDayModal(true); }}
+      >
+        <Text style={[s.cellTxt, { color: txtColor },
+          (isToday || isDone || isMissed) && s.cellTxtBold]}>
+          {day}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+
   return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={s.safe} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
 
       <View style={s.navbar}>
@@ -202,6 +283,8 @@ export default function CalendarScreen({ navigation, route }) {
         </View>
       ) : (
         <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
+
+          {/* Habit pills */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.pillScroll}>
             {habits.map((h) => {
               const sel = h._id === selectedHabitId;
@@ -218,93 +301,93 @@ export default function CalendarScreen({ navigation, route }) {
             })}
           </ScrollView>
 
-          <View style={s.monthNav}>
-            <TouchableOpacity onPress={goPrev} style={s.monthBtn} activeOpacity={0.7}>
-              <Text style={s.monthArrow}>{'<'}</Text>
-            </TouchableOpacity>
-            <Text style={s.monthTitle}>{monthTitle}</Text>
-            <TouchableOpacity
-              onPress={goNext}
-              style={[s.monthBtn, isCurrentMonth && s.monthBtnDisabled]}
-              activeOpacity={isCurrentMonth ? 1 : 0.7}
-              disabled={isCurrentMonth}
-            >
-              <Text style={[s.monthArrow, isCurrentMonth && s.monthArrowDim]}>{'>'}</Text>
-            </TouchableOpacity>
-          </View>
+          {/* ViewShot wrapper — captures everything inside */}
+          <ViewShot
+            ref={calendarRef}
+            options={{ format: 'jpg', quality: 0.95 }}
+          >
+            <View style={s.shareCard}>
 
-          {logsLoading ? (
-            <View style={s.gridLoading}><ActivityIndicator color={colors.primary} /></View>
-          ) : (
-            <View style={s.calBox}>
-              <View style={s.dayHeaderRow}>
-                {DAY_HEADERS.map((d) => (
-                  <Text key={d} style={s.dayHeader}>{d}</Text>
-                ))}
-              </View>
-              {rows.map((row, ri) => (
-                <View key={ri} style={s.calRow}>
-                  {row.map((cell) => {
-                    if (cell.empty) return <View key={cell.key} style={s.cellEmpty} />;
-                    const { day, log, isToday, isFuture, dateStr } = cell;
-                    const isDone   = log?.status === 'done';
-                    const isMissed = log?.status === 'missed';
-                    let bg = 'transparent';
-                    if (isDone)        bg = colors.success;
-                    else if (isMissed) bg = colors.danger;
-                    else if (!isFuture) bg = colors.border;
-                    const todayBorder = isToday && !log;
-                    const todayRing   = isToday && (isDone || isMissed);
-                    let txtColor = colors.borderHover;
-                    if (isDone || isMissed)  txtColor = colors.textPrimary;
-                    else if (isToday)        txtColor = colors.primary;
-                    else if (!isFuture)      txtColor = colors.textMuted;
-                    return (
-                      <TouchableOpacity
-                        key={cell.key}
-                        style={[
-                          s.cell,
-                          { backgroundColor: bg },
-                          todayBorder && s.cellTodayBorder,
-                          todayRing   && s.cellTodayRing,
-                        ]}
-                        activeOpacity={isFuture ? 1 : 0.7}
-                        disabled={isFuture}
-                        onPress={() => { setSelectedDay(dateStr); setShowDayModal(true); }}
-                      >
-                        <Text style={[s.cellTxt, { color: txtColor },
-                          (isToday || isDone || isMissed) && s.cellTxtBold]}>
-                          {day}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
+              {/* Habit header inside share card */}
+              <View style={s.shareHeader}>
+                <Text style={s.shareHabitIcon}>{selectedHabit?.icon}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.shareHabitName}>{selectedHabit?.name}</Text>
+                  <Text style={s.shareHabitSub}>30-day streak tracker</Text>
                 </View>
-              ))}
-            </View>
-          )}
+                <View style={s.streakBadge}>
+                  <Text style={s.streakBadgeText}>🔥 {curStreak} day streak</Text>
+                </View>
+              </View>
 
-          <View style={s.statsBox}>
-            <View style={[s.statCell, s.bRight, s.bBottom]}>
-              <Text style={s.statNum}>{curStreak}</Text>
-              <Text style={s.statLbl}>🔥 Current Streak</Text>
+              {/* Month navigator row with Share button */}
+              <View style={s.monthNav}>
+                <TouchableOpacity onPress={goPrev} style={s.monthBtn} activeOpacity={0.7}>
+                  <Text style={s.monthArrow}>{'<'}</Text>
+                </TouchableOpacity>
+                <Text style={s.monthTitle}>{monthTitle}</Text>
+                <TouchableOpacity
+                  onPress={goNext}
+                  style={[s.monthBtn, isCurrentMonth && s.monthBtnDisabled]}
+                  activeOpacity={isCurrentMonth ? 1 : 0.7}
+                  disabled={isCurrentMonth}
+                >
+                  <Text style={[s.monthArrow, isCurrentMonth && s.monthArrowDim]}>{'>'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.shareBtn} onPress={handleShare} activeOpacity={0.85}>
+                  <Text style={s.shareBtnText}>Share 🚀</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Calendar grid */}
+              {logsLoading ? (
+                <View style={s.gridLoading}><ActivityIndicator color={colors.primary} /></View>
+              ) : (
+                <View style={s.calBox}>
+                  <View style={s.dayHeaderRow}>
+                    {DAY_HEADERS.map((d) => (
+                      <Text key={d} style={s.dayHeader}>{d}</Text>
+                    ))}
+                  </View>
+                  {rows.map((row, ri) => (
+                    <View key={ri} style={s.calRow}>
+                      {row.map(renderCell)}
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Stats row */}
+              <View style={s.statsBox}>
+                <View style={[s.statCell, s.bRight, s.bBottom]}>
+                  <Text style={s.statNum}>{curStreak}</Text>
+                  <Text style={s.statLbl}>🔥 Current</Text>
+                </View>
+                <View style={[s.statCell, s.bBottom]}>
+                  <Text style={s.statNum}>{bestStreak}</Text>
+                  <Text style={s.statLbl}>⭐ Best</Text>
+                </View>
+                <View style={[s.statCell, s.bRight]}>
+                  <Text style={s.statNum}>{completionRate}%</Text>
+                  <Text style={s.statLbl}>✅ Rate</Text>
+                </View>
+                <View style={s.statCell}>
+                  <Text style={s.statNum}>{doneLogs.length}</Text>
+                  <Text style={s.statLbl}>📅 Done</Text>
+                </View>
+              </View>
+
+              {/* StreakBoard watermark */}
+              <View style={s.watermark}>
+                <Text style={s.watermarkText}>🔥 StreakBoard • streak-o.vercel.app</Text>
+              </View>
+
             </View>
-            <View style={[s.statCell, s.bBottom]}>
-              <Text style={s.statNum}>{bestStreak}</Text>
-              <Text style={s.statLbl}>⭐ Best Streak</Text>
-            </View>
-            <View style={[s.statCell, s.bRight]}>
-              <Text style={s.statNum}>{completionRate}%</Text>
-              <Text style={s.statLbl}>✅ Completion</Text>
-            </View>
-            <View style={s.statCell}>
-              <Text style={s.statNum}>{doneLogs.length}</Text>
-              <Text style={s.statLbl}>📅 Total Done</Text>
-            </View>
-          </View>
+          </ViewShot>
         </ScrollView>
       )}
 
+      {/* Day Log Modal */}
       <Modal
         visible={showDayModal}
         animationType="slide"
@@ -379,55 +462,74 @@ const makeStyles = (colors) => StyleSheet.create({
   emptyTitle:  { color: colors.textMuted, fontSize: 14, marginTop: 60 },
   emptySub:    { color: colors.borderHover, fontSize: 12, marginTop: 8 },
 
-  pillScroll:  { flexGrow: 0, marginBottom: 4 },
+  pillScroll:  { flexGrow: 0, marginBottom: 8 },
   pill:        { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginRight: 10,
                  backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
   pillSel:     { backgroundColor: colors.primary, borderColor: colors.primary },
   pillTxt:     { color: colors.textSecondary, fontSize: 13 },
   pillTxtSel:  { color: colors.textPrimary, fontWeight: '600' },
 
-  monthNav:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-                 marginTop: 20, marginBottom: 12 },
-  monthBtn:    { paddingHorizontal: 8, paddingVertical: 4 },
-  monthBtnDisabled: { opacity: 0.3 },
-  monthArrow:  { color: colors.primary, fontSize: 22, fontWeight: '700' },
-  monthArrowDim: { color: colors.primary },
-  monthTitle:  { color: colors.textPrimary, fontSize: 17, fontWeight: '700' },
+  // ViewShot container card
+  shareCard:   { backgroundColor: colors.card, borderRadius: 16, padding: 16, marginBottom: 12 },
 
-  calBox:      { marginBottom: 4 },
-  dayHeaderRow:{ flexDirection: 'row', marginBottom: 4 },
-  dayHeader:   { flex: 1, color: colors.textMuted, fontSize: 11, fontWeight: '500',
-                 textAlign: 'center', paddingBottom: 8 },
-  calRow:      { flexDirection: 'row', marginBottom: 4 },
-  cell:        { flex: 1, aspectRatio: 1, margin: 2, borderRadius: 8,
-                 alignItems: 'center', justifyContent: 'center' },
-  cellEmpty:   { flex: 1, aspectRatio: 1, margin: 2 },
+  // Share header inside card
+  shareHeader:     { flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 10 },
+  shareHabitIcon:  { fontSize: 28 },
+  shareHabitName:  { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
+  shareHabitSub:   { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  streakBadge:     { backgroundColor: 'rgba(124,58,237,0.15)', borderRadius: 20,
+                     paddingHorizontal: 10, paddingVertical: 4 },
+  streakBadgeText: { color: colors.primary, fontSize: 12, fontWeight: '600' },
+
+  monthNav:        { flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 6 },
+  monthBtn:        { paddingHorizontal: 6, paddingVertical: 4 },
+  monthBtnDisabled:{ opacity: 0.3 },
+  monthArrow:      { color: colors.primary, fontSize: 20, fontWeight: '700' },
+  monthArrowDim:   { color: colors.primary },
+  monthTitle:      { color: colors.textPrimary, fontSize: 15, fontWeight: '700', flex: 1, textAlign: 'center' },
+  shareBtn:        { backgroundColor: colors.primary, paddingHorizontal: 14, paddingVertical: 7,
+                     borderRadius: 20, flexDirection: 'row', alignItems: 'center' },
+  shareBtnText:    { color: '#ffffff', fontSize: 13, fontWeight: '600' },
+
+  calBox:          { marginBottom: 8 },
+  dayHeaderRow:    { flexDirection: 'row', marginBottom: 4 },
+  dayHeader:       { flex: 1, color: colors.textMuted, fontSize: 11, fontWeight: '500',
+                     textAlign: 'center', paddingBottom: 6 },
+  calRow:          { flexDirection: 'row', marginBottom: 4 },
+  cell:            { flex: 1, aspectRatio: 1, margin: 2, borderRadius: 8,
+                     alignItems: 'center', justifyContent: 'center' },
+  cellEmpty:       { flex: 1, aspectRatio: 1, margin: 2 },
   cellTodayBorder: { borderWidth: 1.5, borderColor: colors.primary, backgroundColor: 'transparent' },
   cellTodayRing:   { borderWidth: 2, borderColor: colors.primary },
-  cellTxt:     { fontSize: 13 },
-  cellTxtBold: { fontWeight: '700' },
-  gridLoading: { paddingVertical: 48, alignItems: 'center' },
+  cellTxt:         { fontSize: 13 },
+  cellTxtBold:     { fontWeight: '700' },
+  gridLoading:     { paddingVertical: 48, alignItems: 'center' },
 
-  statsBox:    { flexDirection: 'row', flexWrap: 'wrap', backgroundColor: colors.card,
-                 borderRadius: 16, marginTop: 16, overflow: 'hidden' },
-  statCell:    { width: '50%', paddingVertical: 16, alignItems: 'center' },
-  bRight:      { borderRightWidth: 1, borderRightColor: colors.border },
-  bBottom:     { borderBottomWidth: 1, borderBottomColor: colors.border },
-  statNum:     { color: colors.textPrimary, fontSize: 22, fontWeight: '700' },
-  statLbl:     { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  statsBox:  { flexDirection: 'row', flexWrap: 'wrap', borderRadius: 12,
+               borderWidth: 1, borderColor: colors.border, overflow: 'hidden', marginTop: 4 },
+  statCell:  { width: '50%', paddingVertical: 12, alignItems: 'center' },
+  bRight:    { borderRightWidth: 1, borderRightColor: colors.border },
+  bBottom:   { borderBottomWidth: 1, borderBottomColor: colors.border },
+  statNum:   { color: colors.textPrimary, fontSize: 20, fontWeight: '700' },
+  statLbl:   { color: colors.textMuted, fontSize: 10, marginTop: 2 },
 
-  modalBg:     { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  modalSheet:  { backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-                 paddingHorizontal: 24, paddingTop: 20, paddingBottom: 40 },
-  modalHead:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  modalDate:   { color: colors.textPrimary, fontSize: 16, fontWeight: '700', flex: 1, marginRight: 8 },
-  modalX:      { color: colors.textMuted, fontSize: 22 },
+  // Watermark
+  watermark:     { marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border, alignItems: 'center' },
+  watermarkText: { color: colors.textMuted, fontSize: 10 },
+
+  // Day modal
+  modalBg:       { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  modalSheet:    { backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+                   paddingHorizontal: 24, paddingTop: 20, paddingBottom: 40 },
+  modalHead:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  modalDate:     { color: colors.textPrimary, fontSize: 16, fontWeight: '700', flex: 1, marginRight: 8 },
+  modalX:        { color: colors.textMuted, fontSize: 22 },
   currentStatus: { fontSize: 13, marginTop: 12, marginBottom: 4 },
   modalActions:  { flexDirection: 'row', gap: 12, marginTop: 20 },
-  actionBtn:   { flex: 1, height: 56, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  btnDoneFill: { backgroundColor: colors.success },
-  btnDoneOut:  { borderWidth: 1.5, borderColor: colors.success, backgroundColor: 'transparent' },
+  actionBtn:     { flex: 1, height: 56, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  btnDoneFill:   { backgroundColor: colors.success },
+  btnDoneOut:    { borderWidth: 1.5, borderColor: colors.success, backgroundColor: 'transparent' },
   btnMissedFill: { backgroundColor: colors.danger },
   btnMissedOut:  { borderWidth: 1.5, borderColor: colors.danger, backgroundColor: 'transparent' },
-  actionTxt:   { fontSize: 15, fontWeight: '600' },
+  actionTxt:     { fontSize: 15, fontWeight: '600' },
 });

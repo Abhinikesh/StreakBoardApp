@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, Platform } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -12,6 +12,7 @@ import StatsScreen       from '../screens/StatsScreen';
 import FriendsScreen     from '../screens/FriendsScreen';
 import LeaderboardScreen from '../screens/LeaderboardScreen';
 import ProfileScreen     from '../screens/ProfileScreen';
+import JournalScreen    from '../screens/JournalScreen';
 import { useTheme, DARK } from '../context/ThemeContext';
 import SplashScreen from '../screens/SplashScreen';
 
@@ -37,8 +38,8 @@ function MainTabs() {
           backgroundColor: colors.card,
           borderTopColor:  colors.border,
           borderTopWidth:  1,
-          height:          70,
-          paddingBottom:   10,
+          height:          Platform.OS === 'ios' ? 80 : 62,
+          paddingBottom:   Platform.OS === 'ios' ? 20 : 8,
           paddingTop:      6,
           position:        'absolute',
           bottom: 0, left: 0, right: 0,
@@ -72,8 +73,9 @@ function RootStack({ initialRoute }) {
       initialRouteName={initialRoute}
       screenOptions={{ headerShown: false, animationEnabled: false }}
     >
-      <Stack.Screen name="Login" component={LoginScreen} />
-      <Stack.Screen name="Main"  component={MainTabs} />
+      <Stack.Screen name="Login"   component={LoginScreen} />
+      <Stack.Screen name="Main"    component={MainTabs} />
+      <Stack.Screen name="Journal" component={JournalScreen} />
     </Stack.Navigator>
   );
 }

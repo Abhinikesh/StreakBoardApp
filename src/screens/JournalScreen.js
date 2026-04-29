@@ -1,17 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
-  Modal, StyleSheet, ActivityIndicator, SafeAreaView,
+  Modal, StyleSheet, ActivityIndicator,
   StatusBar, RefreshControl, Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import api from '../lib/axios';
-
-const COLORS = {
-  bg: '#0d0d1a', card: '#111120', border: '#1e1e2e',
-  primary: '#7c3aed', textPrimary: '#ffffff',
-  textSecondary: '#888888', textMuted: '#555555',
-  success: '#10b981', danger: '#ef4444',
-};
+import { useTheme } from '../context/ThemeContext';
 
 function formatDateHeader(dateStr) {
   const d = new Date(dateStr + 'T12:00:00');
@@ -21,6 +16,8 @@ function formatDateHeader(dateStr) {
 }
 
 export default function JournalScreen({ navigation }) {
+  const { colors } = useTheme();
+  const s = makeStyles(colors);
   const [habits,          setHabits]          = useState([]);
   const [allNotedLogs,    setAllNotedLogs]    = useState([]);
   const [selectedHabitId, setSelectedHabitId] = useState('all');
@@ -134,13 +131,13 @@ export default function JournalScreen({ navigation }) {
 
   if (loading) {
     return (
-      <View style={s.center}><ActivityIndicator size="large" color={COLORS.primary} /></View>
+      <View style={s.center}><ActivityIndicator size="large" color={colors.primary} /></View>
     );
   }
 
   return (
-    <SafeAreaView style={s.safe}>
-      <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} />
+    <SafeAreaView style={s.safe} edges={['top']}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
 
       <ScrollView
         style={s.scroll}
@@ -149,7 +146,7 @@ export default function JournalScreen({ navigation }) {
         keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh}
-            tintColor={COLORS.primary} colors={[COLORS.primary]} />
+            tintColor={colors.primary} colors={[colors.primary]} />
         }
       >
         {/* ── Header ── */}
@@ -230,10 +227,10 @@ export default function JournalScreen({ navigation }) {
                           {habit?.name || 'Habit'}
                         </Text>
                         <View style={[s.statusBadge,
-                          { backgroundColor: isDone ? COLORS.success + '33' : COLORS.danger + '33' }
+                          { backgroundColor: isDone ? colors.success + '33' : colors.danger + '33' }
                         ]}>
                           <Text style={[s.statusBadgeText,
-                            { color: isDone ? COLORS.success : COLORS.danger }
+                            { color: isDone ? colors.success : colors.danger }
                           ]}>
                             {isDone ? '✓ Done' : '✗ Missed'}
                           </Text>
@@ -290,7 +287,7 @@ export default function JournalScreen({ navigation }) {
               value={noteText}
               onChangeText={setNoteText}
               placeholder="How did it go today? Add a note..."
-              placeholderTextColor={COLORS.textMuted}
+              placeholderTextColor={colors.textMuted}
               multiline
               numberOfLines={4}
               textAlignVertical="top"
@@ -307,7 +304,7 @@ export default function JournalScreen({ navigation }) {
               disabled={saving}
             >
               {saving
-                ? <ActivityIndicator color={COLORS.textPrimary} />
+                ? <ActivityIndicator color={colors.textPrimary} />
                 : <Text style={s.saveBtnText}>Save Note</Text>
               }
             </TouchableOpacity>
@@ -325,9 +322,9 @@ export default function JournalScreen({ navigation }) {
   );
 }
 
-const s = StyleSheet.create({
-  safe:    { flex: 1, backgroundColor: COLORS.bg },
-  center:  { flex: 1, backgroundColor: COLORS.bg, alignItems: 'center', justifyContent: 'center' },
+const makeStyles = (colors) => StyleSheet.create({
+  safe:    { flex: 1, backgroundColor: colors.bg },
+  center:  { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
   scroll:  { flex: 1 },
   content: { paddingHorizontal: 20, paddingBottom: 100, paddingTop: 16 },
 
@@ -337,58 +334,58 @@ const s = StyleSheet.create({
   // Filter pills
   pillsScroll:  { marginBottom: 16 },
   pillsContent: { paddingRight: 20 },
-  pill:         { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, marginRight: 8, backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border },
-  pillActive:   { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  pillText:     { color: COLORS.textSecondary, fontSize: 12, fontWeight: '500' },
-  pillTextActive:{ color: COLORS.textPrimary, fontWeight: '600' },
+  pill:         { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, marginRight: 8, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
+  pillActive:   { backgroundColor: colors.primary, borderColor: colors.primary },
+  pillText:     { color: colors.textSecondary, fontSize: 12, fontWeight: '500' },
+  pillTextActive:{ color: colors.textPrimary, fontWeight: '600' },
 
   // Date header
   dateHeader: {
-    color: COLORS.textMuted, fontSize: 12, fontWeight: '600',
+    color: colors.textMuted, fontSize: 12, fontWeight: '600',
     letterSpacing: 1, marginTop: 16, marginBottom: 8,
   },
 
   // Entry card
   entryCard: {
-    backgroundColor: COLORS.card, borderRadius: 16, borderWidth: 1,
-    borderColor: COLORS.border, padding: 16, marginBottom: 10,
+    backgroundColor: colors.card, borderRadius: 16, borderWidth: 1,
+    borderColor: colors.border, padding: 16, marginBottom: 10,
   },
   entryTopRow:     { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   entryEmoji:      { fontSize: 22, marginRight: 10 },
   entryMeta:       { flex: 1 },
-  entryHabitName:  { color: COLORS.textPrimary, fontSize: 14, fontWeight: '600' },
+  entryHabitName:  { color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
   statusBadge:     { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, marginTop: 3 },
   statusBadgeText: { fontSize: 10, fontWeight: '600' },
   editBtn:         { fontSize: 18 },
-  noteText:        { color: COLORS.textSecondary, fontSize: 14, lineHeight: 20, fontStyle: 'italic' },
+  noteText:        { color: colors.textSecondary, fontSize: 14, lineHeight: 20, fontStyle: 'italic' },
 
   // Empty states
   emptyState: { alignItems: 'center', marginTop: 60 },
   emptyEmoji: { fontSize: 48, textAlign: 'center' },
-  emptyTitle: { color: COLORS.textPrimary, fontSize: 18, fontWeight: '700', marginTop: 12 },
-  emptySub:   { color: COLORS.textMuted, fontSize: 13, marginTop: 8, textAlign: 'center' },
-  emptyBtn:   { marginTop: 20, backgroundColor: COLORS.primary, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 28 },
-  emptyBtnText:{ color: COLORS.textPrimary, fontSize: 15, fontWeight: '600' },
-  filterEmpty: { color: COLORS.textMuted, fontSize: 14, textAlign: 'center', marginTop: 40 },
+  emptyTitle: { color: colors.textPrimary, fontSize: 18, fontWeight: '700', marginTop: 12 },
+  emptySub:   { color: colors.textMuted, fontSize: 13, marginTop: 8, textAlign: 'center' },
+  emptyBtn:   { marginTop: 20, backgroundColor: colors.primary, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 28 },
+  emptyBtnText:{ color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
+  filterEmpty: { color: colors.textMuted, fontSize: 14, textAlign: 'center', marginTop: 40 },
 
   // Modal
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  modalSheet:    { backgroundColor: COLORS.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 24, paddingTop: 20, paddingBottom: 40 },
+  modalSheet:    { backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 24, paddingTop: 20, paddingBottom: 40 },
   modalHeader:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
   modalHeaderLeft:{ flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 12 },
   modalHeaderEmoji:{ fontSize: 22, marginRight: 8 },
-  modalHeaderName: { color: COLORS.textPrimary, fontSize: 16, fontWeight: '700', flex: 1 },
-  modalClose:    { color: COLORS.textMuted, fontSize: 20 },
-  modalDate:     { color: COLORS.textMuted, fontSize: 12, marginBottom: 16 },
+  modalHeaderName: { color: colors.textPrimary, fontSize: 16, fontWeight: '700', flex: 1 },
+  modalClose:    { color: colors.textMuted, fontSize: 20 },
+  modalDate:     { color: colors.textMuted, fontSize: 12, marginBottom: 16 },
 
   noteInput: {
-    backgroundColor: COLORS.bg, borderWidth: 1, borderColor: COLORS.border,
+    backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border,
     borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14,
-    color: COLORS.textPrimary, minHeight: 120, marginBottom: 16,
+    color: colors.textPrimary, minHeight: 120, marginBottom: 16,
   },
-  noteInputFocused: { borderColor: COLORS.primary },
+  noteInputFocused: { borderColor: colors.primary },
 
-  saveBtn:     { width: '100%', height: 52, backgroundColor: COLORS.primary, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  saveBtnText: { color: COLORS.textPrimary, fontSize: 15, fontWeight: '600' },
-  removeNoteText:{ color: COLORS.danger, fontSize: 12, textAlign: 'center', marginTop: 12 },
+  saveBtn:     { width: '100%', height: 52, backgroundColor: colors.primary, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  saveBtnText: { color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
+  removeNoteText:{ color: colors.danger, fontSize: 12, textAlign: 'center', marginTop: 12 },
 });

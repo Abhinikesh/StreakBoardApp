@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
-  StyleSheet, ActivityIndicator, SafeAreaView, StatusBar,
+  StyleSheet, ActivityIndicator, StatusBar,
   RefreshControl, Switch, Alert, Share, Linking,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
 import api from '../lib/axios';
 import { useTheme } from '../context/ThemeContext';
@@ -94,7 +95,7 @@ export default function FriendsScreen() {
   }
 
   return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={s.safe} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
 
       <View style={s.navbar}>

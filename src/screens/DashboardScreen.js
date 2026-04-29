@@ -10,26 +10,16 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
-  SafeAreaView,
   StatusBar,
   Animated,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../lib/axios';
 import { playDoneSound, playMissedSound } from '../lib/sound';
+import { useTheme } from '../context/ThemeContext';
 
-// ─── Color constants ──────────────────────────────────────────────────────────
-const COLORS = {
-  bg:            '#0d0d1a',
-  card:          '#111120',
-  border:        '#1e1e2e',
-  borderHover:   '#2a2a3a',
-  primary:       '#7c3aed',
-  textPrimary:   '#ffffff',
-  textSecondary: '#888888',
-  textMuted:     '#555555',
-  success:       '#10b981',
-  danger:        '#ef4444',
-};
+
 
 // ─── Emoji / color pickers ────────────────────────────────────────────────────
 const EMOJI_OPTIONS = [
@@ -132,6 +122,8 @@ async function apiWithRetry(fn, retries = 2) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function DashboardScreen({ navigation }) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
   const [habits,      setHabits]      = useState([]);
   const [habitLogs,   setHabitLogs]   = useState({}); // { [habitId]: { allLogs, todayLog } }
   const [profile,     setProfile]     = useState({ name: '', email: '' });
@@ -289,19 +281,35 @@ export default function DashboardScreen({ navigation }) {
 
   // ── Save note ──────────────────────────────────────────────────────────────
   const handleSaveNote = useCallback(async () => {
-    const todayLog = habitLogs[noteModalHabit?._id]?.todayLog;
-    if (!todayLog) {
-      Alert.alert('No log yet', 'Log the habit first (✓ or ✗) before adding a note.');
-      return;
-    }
+    if (!noteModalHabit) return;
+    const todayLog = habitLogs[noteModalHabit._id]?.todayLog;
+    const noteKey  = `note_${noteModalHabit._id}_${todayStr()}`;
     setNoteSaving(true);
     try {
-      await api.put(`/api/logs/${todayLog._id}/note`, { note: noteText.trim() });
-      setShowNoteModal(false); setNoteText(''); setNoteModalHabit(null);
-      await refreshHabitLogs(noteModalHabit._id);
+      // Try API first (requires a log to exist)
+      if (todayLog) {
+        await api.put(`/api/logs/${todayLog._id}/note`, { note: noteText.trim() });
+        await refreshHabitLogs(noteModalHabit._id);
+      } else {
+        // No log yet → save locally so note isn't lost
+        await AsyncStorage.setItem(noteKey, noteText.trim());
+      }
+      setShowNoteModal(false);
+      setNoteText('');
+      setNoteModalHabit(null);
     } catch (_) {
-      Alert.alert('Error', 'Failed to save note.');
-    } finally { setNoteSaving(false); }
+      // API failed → fall back to AsyncStorage silently
+      try {
+        await AsyncStorage.setItem(noteKey, noteText.trim());
+        setShowNoteModal(false);
+        setNoteText('');
+        setNoteModalHabit(null);
+      } catch (__) {
+        Alert.alert('Error', 'Could not save note.');
+      }
+    } finally {
+      setNoteSaving(false);
+    }
   }, [habitLogs, noteModalHabit, noteText, refreshHabitLogs]);
 
   // ── Derived stats ───────────────────────────────────────────────────────────
@@ -328,7 +336,7 @@ export default function DashboardScreen({ navigation }) {
     const habitStatuses = habits.map((h) => {
       const logs = habitLogs[h._id]?.allLogs || [];
       const log = logs.find((l) => l.date === ds);
-      return { habitId: h._id, colorHex: h.colorHex || COLORS.primary, status: log?.status || null };
+      return { habitId: h._id, colorHex: h.colorHex || colors.primary, status: log?.status || null };
     });
     return { date: ds, dayLabel: DAY_LABELS[i], dayNum: d.getDate(), isToday, isFuture, habitStatuses };
   });
@@ -349,15 +357,15 @@ export default function DashboardScreen({ navigation }) {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
 
   // ─── Render ─────────────────────────────────────────────────────────────────
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} />
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
 
       {/* ── Navbar — pinned outside ScrollView ── */}
       <View style={styles.navbar}>
@@ -373,8 +381,8 @@ export default function DashboardScreen({ navigation }) {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor={COLORS.primary}
-            colors={[COLORS.primary]}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
           />
         }
       >
@@ -400,14 +408,14 @@ export default function DashboardScreen({ navigation }) {
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <Text style={[styles.statNumber, { color: COLORS.success }]}>
+            <Text style={[styles.statNumber, { color: colors.success }]}>
               {statsDone}
             </Text>
             <Text style={styles.statLabel}>Done</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <Text style={[styles.statNumber, { color: COLORS.danger }]}>
+            <Text style={[styles.statNumber, { color: colors.danger }]}>
               {statsMissed}
             </Text>
             <Text style={styles.statLabel}>Missed</Text>
@@ -450,12 +458,12 @@ export default function DashboardScreen({ navigation }) {
                           key={hs.habitId}
                           style={[styles.weekDot, {
                             backgroundColor: day.isFuture
-                              ? COLORS.border
+                              ? colors.border
                               : hs.status === 'done'
                               ? hs.colorHex
                               : hs.status === 'missed'
-                              ? COLORS.danger
-                              : '#2a2a3a',
+                              ? colors.danger
+                              : colors.borderHover,
                             opacity: day.isFuture ? 0.3 : 1,
                           }]}
                         />
@@ -506,7 +514,7 @@ export default function DashboardScreen({ navigation }) {
                 <View
                   style={[
                     styles.accentBar,
-                    { backgroundColor: habit.colorHex || COLORS.primary },
+                    { backgroundColor: habit.colorHex || colors.primary },
                   ]}
                 />
 
@@ -578,8 +586,17 @@ export default function DashboardScreen({ navigation }) {
                   <TouchableOpacity
                     style={styles.iconBtn}
                     activeOpacity={0.75}
-                    onPress={() => {
-                      setNoteText(habitLogs[habit._id]?.todayLog?.note || '');
+                    onPress={async () => {
+                      const todayLog = habitLogs[habit._id]?.todayLog;
+                      // Load note: prefer today's log note, fall back to AsyncStorage
+                      let savedNote = todayLog?.note || '';
+                      if (!savedNote) {
+                        try {
+                          const local = await AsyncStorage.getItem(`note_${habit._id}_${todayStr()}`);
+                          if (local) savedNote = local;
+                        } catch (_) {}
+                      }
+                      setNoteText(savedNote);
                       setNoteModalHabit(habit);
                       setShowNoteModal(true);
                     }}
@@ -659,7 +676,7 @@ export default function DashboardScreen({ navigation }) {
               <TextInput
                 style={styles.fieldInput}
                 placeholder="e.g. Cold shower"
-                placeholderTextColor={COLORS.textMuted}
+                placeholderTextColor={colors.textMuted}
                 value={newHabit.name}
                 onChangeText={(v) => setNewHabit((p) => ({ ...p, name: v }))}
                 fontSize={16}
@@ -736,7 +753,7 @@ export default function DashboardScreen({ navigation }) {
                 disabled={creating}
               >
                 {creating ? (
-                  <ActivityIndicator color={COLORS.textPrimary} />
+                  <ActivityIndicator color={colors.textPrimary} />
                 ) : (
                   <Text style={styles.createBtnText}>Create Habit 🔥</Text>
                 )}
@@ -769,7 +786,7 @@ export default function DashboardScreen({ navigation }) {
               value={noteText}
               onChangeText={setNoteText}
               placeholder="How did it go today?"
-              placeholderTextColor={COLORS.textMuted}
+              placeholderTextColor={colors.textMuted}
               multiline
               textAlignVertical="top"
               fontSize={15}
@@ -783,7 +800,7 @@ export default function DashboardScreen({ navigation }) {
               activeOpacity={0.85}
             >
               {noteSaving
-                ? <ActivityIndicator color={COLORS.textPrimary} />
+                ? <ActivityIndicator color={colors.textPrimary} />
                 : <Text style={styles.noteSaveBtnTxt}>Save Note</Text>}
             </TouchableOpacity>
           </View>
@@ -794,14 +811,14 @@ export default function DashboardScreen({ navigation }) {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: COLORS.bg,
+    backgroundColor: colors.bg,
   },
   loadingContainer: {
     flex: 1,
-    backgroundColor: COLORS.bg,
+    backgroundColor: colors.bg,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -828,12 +845,12 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   dateText: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 12,
     fontWeight: '500',
   },
   greetingText: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 22,
     fontWeight: '700',
     marginTop: 2,
@@ -842,12 +859,12 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: COLORS.primary,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarText: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 16,
     fontWeight: '700',
   },
@@ -855,7 +872,7 @@ const styles = StyleSheet.create({
   // ── Stats bar ──
   statsBar: {
     flexDirection: 'row',
-    backgroundColor: COLORS.card,
+    backgroundColor: colors.card,
     borderRadius: 14,
     paddingVertical: 14,
     paddingHorizontal: 16,
@@ -867,29 +884,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statNumber: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 20,
     fontWeight: '700',
   },
   statLabel: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 11,
     marginTop: 2,
   },
   statDivider: {
     width: 1,
     height: 32,
-    backgroundColor: COLORS.border,
+    backgroundColor: colors.border,
     marginHorizontal: 4,
   },
 
   // ── Habit card ──
   habitCard: {
     flexDirection: 'row',
-    backgroundColor: COLORS.card,
+    backgroundColor: colors.card,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
     marginBottom: 12,
     overflow: 'hidden',
     alignItems: 'center',
@@ -912,7 +929,7 @@ const styles = StyleSheet.create({
     fontSize: 22,
   },
   habitName: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 15,
     fontWeight: '600',
     marginLeft: 10,
@@ -927,13 +944,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   streakText: {
-    color: COLORS.primary,
+    color: colors.primary,
     fontSize: 12,
     fontWeight: '500',
     marginLeft: 4,
   },
   streakZero: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 12,
   },
 
@@ -950,25 +967,25 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: 'transparent',
     borderWidth: 1.5,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
   actionBtnDone: {
-    backgroundColor: COLORS.success,
-    borderColor: COLORS.success,
+    backgroundColor: colors.success,
+    borderColor: colors.success,
   },
   actionBtnMissed: {
-    backgroundColor: COLORS.danger,
-    borderColor: COLORS.danger,
+    backgroundColor: colors.danger,
+    borderColor: colors.danger,
   },
   actionBtnText: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 16,
     fontWeight: '700',
   },
   actionBtnTextActive: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
   },
 
   // ── Empty state ──
@@ -981,26 +998,26 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   emptyTitle: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 18,
     fontWeight: '700',
     marginTop: 16,
   },
   emptySub: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 14,
     marginTop: 8,
     textAlign: 'center',
   },
   emptyAddBtn: {
     marginTop: 24,
-    backgroundColor: COLORS.primary,
+    backgroundColor: colors.primary,
     borderRadius: 14,
     paddingVertical: 14,
     paddingHorizontal: 28,
   },
   emptyAddBtnText: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 15,
     fontWeight: '600',
   },
@@ -1013,17 +1030,17 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: COLORS.primary,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: COLORS.primary,
+    shadowColor: colors.primary,
     shadowOpacity: 0.4,
     shadowOffset: { width: 0, height: 4 },
     shadowRadius: 12,
     elevation: 8,
   },
   fabText: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 28,
     lineHeight: 32,
     fontWeight: '400',
@@ -1036,7 +1053,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalSheet: {
-    backgroundColor: COLORS.card,
+    backgroundColor: colors.card,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 24,
@@ -1051,30 +1068,30 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   modalTitle: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 20,
     fontWeight: '700',
   },
   modalClose: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 18,
   },
 
   // Form fields
   fieldLabel: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 12,
     marginBottom: 8,
     marginTop: 16,
   },
   fieldInput: {
-    backgroundColor: COLORS.bg,
+    backgroundColor: colors.bg,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
     borderRadius: 14,
     height: 50,
     paddingHorizontal: 16,
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 16,
   },
 
@@ -1089,12 +1106,12 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
   emojiOptionSelected: {
-    borderColor: COLORS.primary,
+    borderColor: colors.primary,
     backgroundColor: 'rgba(124,58,237,0.2)',
   },
   emojiOptionText: {
@@ -1114,7 +1131,7 @@ const styles = StyleSheet.create({
   },
   colorCircleSelected: {
     borderWidth: 2.5,
-    borderColor: COLORS.textPrimary,
+    borderColor: colors.textPrimary,
     transform: [{ scale: 1.15 }],
   },
 
@@ -1128,20 +1145,20 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
   periodPillSelected: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   periodPillText: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 13,
   },
   periodPillTextSelected: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontWeight: '600',
   },
 
@@ -1149,14 +1166,14 @@ const styles = StyleSheet.create({
   createBtn: {
     width: '100%',
     height: 52,
-    backgroundColor: COLORS.primary,
+    backgroundColor: colors.primary,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 24,
   },
   createBtnText: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 15,
     fontWeight: '600',
   },
@@ -1171,21 +1188,21 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     marginBottom: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e1e2e',
+    borderBottomColor: colors.border,
   },
   navbarBrand: {
-    color: COLORS.primary,
+    color: colors.primary,
     fontSize: 20,
     fontWeight: '800',
   },
   navbarDate: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 11,
   },
 
   // ── Suggestion chips ──
   suggestionsLabel: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 11,
     marginBottom: 6,
     marginTop: 10,
@@ -1198,34 +1215,34 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 20,
     marginRight: 8,
-    backgroundColor: COLORS.border,
+    backgroundColor: colors.border,
     borderWidth: 1,
-    borderColor: '#2a2a3a',
+    borderColor: colors.borderHover,
   },
   suggestionChipText: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 12,
   },
   suggestionChipSelected: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   suggestionChipTextSelected: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontWeight: '700',
   },
 
   // ── Note Modal ──
   noteModalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  noteModalSheet: { backgroundColor: COLORS.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 36 },
+  noteModalSheet: { backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 36 },
   noteModalCloseBtn: { position: 'absolute', top: 16, right: 20 },
-  noteModalCloseTxt: { color: COLORS.textMuted, fontSize: 20 },
-  noteModalTitle: { color: COLORS.textPrimary, fontSize: 16, fontWeight: '700', marginBottom: 4, marginTop: 8 },
-  noteModalSub: { color: COLORS.textMuted, fontSize: 12, marginBottom: 14 },
-  noteInput: { backgroundColor: COLORS.bg, borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12, color: COLORS.textPrimary, minHeight: 100, marginBottom: 16 },
-  noteInputFocused: { borderColor: COLORS.primary },
-  noteSaveBtn: { width: '100%', height: 50, backgroundColor: COLORS.primary, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  noteSaveBtnTxt: { color: COLORS.textPrimary, fontSize: 15, fontWeight: '700' },
+  noteModalCloseTxt: { color: colors.textMuted, fontSize: 20 },
+  noteModalTitle: { color: colors.textPrimary, fontSize: 16, fontWeight: '700', marginBottom: 4, marginTop: 8 },
+  noteModalSub: { color: colors.textMuted, fontSize: 12, marginBottom: 14 },
+  noteInput: { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12, color: colors.textPrimary, minHeight: 100, marginBottom: 16 },
+  noteInputFocused: { borderColor: colors.primary },
+  noteSaveBtn: { width: '100%', height: 50, backgroundColor: colors.primary, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  noteSaveBtnTxt: { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
 
   // ── Progress bar ──
   progressSection: {
@@ -1238,26 +1255,26 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   progressLabel: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 11,
     fontWeight: '600',
     letterSpacing: 1,
   },
   progressCount: {
-    color: COLORS.primary,
+    color: colors.primary,
     fontSize: 12,
     fontWeight: '600',
   },
   progressTrack: {
     height: 6,
     borderRadius: 3,
-    backgroundColor: COLORS.border,
+    backgroundColor: colors.border,
     overflow: 'hidden',
   },
   progressFill: {
     height: 6,
     borderRadius: 3,
-    backgroundColor: COLORS.primary,
+    backgroundColor: colors.primary,
   },
 
   // ── This Week ──
@@ -1271,19 +1288,19 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   weekTitle: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 15,
     fontWeight: '700',
   },
   weekRange: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 11,
   },
   weekCard: {
-    backgroundColor: COLORS.card,
+    backgroundColor: colors.card,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
     padding: 14,
   },
   weekGrid: {
@@ -1296,20 +1313,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   weekDayLabel: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 9,
     textAlign: 'center',
     marginBottom: 4,
   },
   weekDayNum: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 13,
     fontWeight: '600',
     textAlign: 'center',
     marginBottom: 6,
   },
   weekDayNumToday: {
-    color: COLORS.primary,
+    color: colors.primary,
     fontWeight: '700',
   },
   weekDots: {
@@ -1325,26 +1342,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     borderTopWidth: 1,
-    borderTopColor: COLORS.border,
+    borderTopColor: colors.border,
     paddingTop: 10,
     marginTop: 4,
   },
   weekSumDone: {
-    color: COLORS.success,
+    color: colors.success,
     fontSize: 11,
     fontWeight: '500',
   },
   weekSumMissed: {
-    color: COLORS.danger,
+    color: colors.danger,
     fontSize: 11,
     fontWeight: '500',
   },
   weekSumPending: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 11,
   },
   weekBestDay: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 11,
     textAlign: 'center',
     marginTop: 6,
@@ -1357,7 +1374,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },

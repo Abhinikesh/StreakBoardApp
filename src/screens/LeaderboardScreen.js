@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
-  StyleSheet, ActivityIndicator, SafeAreaView,
+  StyleSheet, ActivityIndicator,
   StatusBar, RefreshControl,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import api from '../lib/axios';
 import { useTheme } from '../context/ThemeContext';
 
@@ -31,10 +33,25 @@ export default function LeaderboardScreen() {
         api.get('/api/social/leaderboard'),
         api.get('/api/user/profile'),
       ]);
-      setEntries(lbRes.data || []);
+      // Normalise field names: API returns overallRate and longestStreak
+      const raw = lbRes.data || [];
+      const normalised = raw.map((e) => ({
+        ...e,
+        // streak fields — screen looks for .streak or .currentStreak
+        currentStreak: Number(e.currentStreak ?? e.longestStreak ?? e.streak ?? 0),
+        streak:        Number(e.currentStreak ?? e.longestStreak ?? e.streak ?? 0),
+        // rate field — screen looks for .completionRate or .rate
+        completionRate: Number(e.completionRate ?? e.overallRate ?? e.rate ?? 0),
+        rate:           Number(e.completionRate ?? e.overallRate ?? e.rate ?? 0),
+        // done field
+        totalDone: Number(e.totalDone ?? e.done ?? 0),
+      }));
+      setEntries(normalised);
       setMyId(meRes.data?._id || meRes.data?.id || null);
     } catch (_) {}
   }, []);
+
+  useFocusEffect(useCallback(() => { fetchAll(); }, [fetchAll]));
 
   useEffect(() => {
     (async () => { setLoading(true); await fetchAll(); setLoading(false); })();
@@ -44,11 +61,24 @@ export default function LeaderboardScreen() {
     setRefreshing(true); await fetchAll(); setRefreshing(false);
   }, [fetchAll]);
 
-  const sorted = [...entries].sort((a, b) => {
-    if (tab === 'streak') return (b.streak || b.currentStreak || 0) - (a.streak || a.currentStreak || 0);
-    if (tab === 'rate')   return (getRate(b)) - (getRate(a));
-    return (b.totalDone || b.done || 0) - (a.totalDone || a.done || 0);
-  });
+  const sorted = (() => {
+    try {
+      return [...entries]
+        .map((e) => ({
+          ...e,
+          currentStreak:  Number(e.currentStreak)  || 0,
+          completionRate: Number(e.completionRate) || 0,
+          totalDone:      Number(e.totalDone)      || 0,
+        }))
+        .sort((a, b) => {
+          if (tab === 'streak') return b.currentStreak  - a.currentStreak;
+          if (tab === 'rate')   return b.completionRate - a.completionRate;
+          return b.totalDone - a.totalDone;
+        });
+    } catch (_) {
+      return [];
+    }
+  })();
 
   const getRate = (entry) => entry.rate ?? entry.completionRate ?? entry.completion ?? 0;
 
@@ -78,7 +108,7 @@ export default function LeaderboardScreen() {
   }
 
   return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={s.safe} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
 
       <View style={s.navbar}>
