@@ -5,125 +5,116 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import * as SecureStore from 'expo-secure-store';
 
-import { COLORS } from '../constants/colors';
-
-import LoginScreen      from '../screens/LoginScreen';
-import DashboardScreen  from '../screens/DashboardScreen';
-import CalendarScreen   from '../screens/CalendarScreen';
-import StatsScreen      from '../screens/StatsScreen';
+import LoginScreen       from '../screens/LoginScreen';
+import DashboardScreen   from '../screens/DashboardScreen';
+import CalendarScreen    from '../screens/CalendarScreen';
+import StatsScreen       from '../screens/StatsScreen';
+import FriendsScreen     from '../screens/FriendsScreen';
 import LeaderboardScreen from '../screens/LeaderboardScreen';
-import ProfileScreen    from '../screens/ProfileScreen';
+import ProfileScreen     from '../screens/ProfileScreen';
 
 const Stack = createStackNavigator();
 const Tab   = createBottomTabNavigator();
 
-// ─── Tab icon component ───────────────────────────────────────────────────────
-function TabIcon({ emoji, focused }) {
-  return (
-    <View style={tabIconStyles.wrapper}>
-      <Text style={tabIconStyles.emoji}>{emoji}</Text>
-    </View>
-  );
-}
+// ─── Tab config ───────────────────────────────────────────────────────────────
+const TABS = [
+  { name: 'Home',      label: 'Home',     emoji: '🏠', component: DashboardScreen },
+  { name: 'Calendar',  label: 'Calendar', emoji: '📅', component: CalendarScreen },
+  { name: 'Stats',     label: 'Stats',    emoji: '📊', component: StatsScreen },
+  { name: 'Friends',   label: 'Friends',  emoji: '👥', component: FriendsScreen },
+  { name: 'Ranks',     label: 'Ranks',    emoji: '🏆', component: LeaderboardScreen },
+  { name: 'Profile',   label: 'Profile',  emoji: '👤', component: ProfileScreen },
+];
 
-const tabIconStyles = StyleSheet.create({
-  wrapper: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emoji: {
-    fontSize: 22,
-  },
-});
-
-// ─── Auth Stack ───────────────────────────────────────────────────────────────
-function AuthStack() {
-  return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Login" component={LoginScreen} />
-    </Stack.Navigator>
-  );
-}
-
-// ─── Main Tabs ────────────────────────────────────────────────────────────────
+// ─── Main 6-tab navigator ─────────────────────────────────────────────────────
 function MainTabs() {
   return (
     <Tab.Navigator
-      screenOptions={({ route }) => ({
+      screenOptions={{
         headerShown: false,
-        tabBarStyle: styles.tabBar,
-        tabBarActiveTintColor:   COLORS.primary,
-        tabBarInactiveTintColor: COLORS.textMuted,
-        tabBarLabelStyle: styles.tabLabel,
-        tabBarIcon: ({ focused }) => {
-          const icons = {
-            Dashboard:   '🏠',
-            Calendar:    '📅',
-            Stats:       '📊',
-            Leaderboard: '🏆',
-            Profile:     '👤',
-          };
-          return <TabIcon emoji={icons[route.name]} focused={focused} />;
+        tabBarStyle: {
+          backgroundColor: '#111120',
+          borderTopColor:  '#1e1e2e',
+          borderTopWidth:  1,
+          height:          70,
+          paddingBottom:   10,
+          paddingTop:      6,
+          position:        'absolute',
+          bottom:          0,
+          left:            0,
+          right:           0,
         },
-      })}
+        tabBarActiveTintColor:   '#7c3aed',
+        tabBarInactiveTintColor: '#555555',
+        tabBarLabelStyle: {
+          fontSize:   10,
+          fontWeight: '600',
+          marginTop:  2,
+        },
+        tabBarIconStyle: {
+          marginBottom: 0,
+        },
+      }}
     >
-      <Tab.Screen name="Dashboard"   component={DashboardScreen} />
-      <Tab.Screen name="Calendar"    component={CalendarScreen} />
-      <Tab.Screen name="Stats"       component={StatsScreen} />
-      <Tab.Screen name="Leaderboard" component={LeaderboardScreen} />
-      <Tab.Screen name="Profile"     component={ProfileScreen} />
+      {TABS.map(({ name, label, emoji, component }) => (
+        <Tab.Screen
+          key={name}
+          name={name}
+          component={component}
+          options={{
+            tabBarLabel: label,
+            tabBarIcon: ({ color }) => (
+              <Text style={{ fontSize: 22, color }}>{emoji}</Text>
+            ),
+          }}
+        />
+      ))}
     </Tab.Navigator>
   );
 }
 
-// ─── Loading screen shown while token check runs ─────────────────────────────
-function LoadingScreen() {
-  return <View style={styles.loading} />;
+// ─── Root stack (Login → Main) ────────────────────────────────────────────────
+function RootStack({ initialRoute }) {
+  return (
+    <Stack.Navigator
+      initialRouteName={initialRoute}
+      screenOptions={{ headerShown: false, animationEnabled: false }}
+    >
+      <Stack.Screen name="Login" component={LoginScreen} />
+      <Stack.Screen name="Main"  component={MainTabs} />
+    </Stack.Navigator>
+  );
 }
 
-// ─── Root Navigator ───────────────────────────────────────────────────────────
+// ─── Loading screen ───────────────────────────────────────────────────────────
+function LoadingScreen() {
+  return <View style={s.loading} />;
+}
+
+// ─── Root navigator ───────────────────────────────────────────────────────────
 export default function AppNavigator() {
-  const [isLoading, setIsLoading] = useState(true);
-  const [hasToken,  setHasToken]  = useState(false);
+  const [status,       setStatus]       = useState('loading'); // 'loading' | 'auth' | 'main'
 
   useEffect(() => {
     (async () => {
       try {
         const token = await SecureStore.getItemAsync('token');
-        setHasToken(!!token);
+        setStatus(token ? 'main' : 'auth');
       } catch (_) {
-        setHasToken(false);
-      } finally {
-        setIsLoading(false);
+        setStatus('auth');
       }
     })();
   }, []);
 
-  if (isLoading) return <LoadingScreen />;
+  if (status === 'loading') return <LoadingScreen />;
 
   return (
     <NavigationContainer>
-      {hasToken ? <MainTabs /> : <AuthStack />}
+      <RootStack initialRoute={status === 'main' ? 'Main' : 'Login'} />
     </NavigationContainer>
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
-  loading: {
-    flex: 1,
-    backgroundColor: COLORS.bg,
-  },
-  tabBar: {
-    backgroundColor:  COLORS.card,
-    borderTopColor:   COLORS.border,
-    borderTopWidth:   1,
-    paddingBottom:    6,
-    paddingTop:       6,
-    height:           60,
-  },
-  tabLabel: {
-    fontSize:   10,
-    marginTop:  2,
-  },
+const s = StyleSheet.create({
+  loading: { flex: 1, backgroundColor: '#0d0d1a' },
 });

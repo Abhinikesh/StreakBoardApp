@@ -1,123 +1,210 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity,
-  TextInput, StyleSheet, ActivityIndicator,
-  SafeAreaView, StatusBar, Alert, Switch,
+  View, Text, ScrollView, TouchableOpacity, TextInput,
+  StyleSheet, ActivityIndicator, SafeAreaView, StatusBar,
+  Alert, Switch, Share,
 } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+import * as Clipboard from 'expo-clipboard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import api, { setAuthToken } from '../lib/axios';
+import { useTheme } from '../context/ThemeContext';
+import {
+  requestNotificationPermission,
+  scheduleHabitReminder,
+  cancelHabitReminder,
+  getReminderSettings,
+} from '../lib/notifications';
 
 const COLORS = {
   bg: '#0d0d1a', card: '#111120', border: '#1e1e2e',
-  borderHover: '#2a2a3a', primary: '#7c3aed',
-  textPrimary: '#ffffff', textSecondary: '#888888',
-  textMuted: '#555555', success: '#10b981', danger: '#ef4444',
+  primary: '#7c3aed', textPrimary: '#ffffff',
+  textSecondary: '#888888', textMuted: '#555555',
+  success: '#10b981', danger: '#ef4444',
 };
 
-export default function ProfileScreen({ navigation }) {
-  const [profile,      setProfile]      = useState({ name: '', email: '' });
-  const [loading,      setLoading]      = useState(true);
-  const [saving,       setSaving]       = useState(false);
-  const [editName,     setEditName]     = useState('');
-  const [editMode,     setEditMode]     = useState(false);
-  const [nameFocused,  setNameFocused]  = useState(false);
-  const [notifEnabled, setNotifEnabled] = useState(false);
-  const [reminderTime, setReminderTime] = useState('08:00');
-  const [stats,        setStats]        = useState({ habits: 0, totalDone: 0, streak: 0 });
+const BASE_URL = 'https://streak-o.vercel.app';
 
-  // ── Fetch profile + quick stats ──────────────────────────────────────────────
-  const fetchProfile = useCallback(async () => {
+function quickStreak(logs) {
+  const toStr = (d) => d.toISOString().split('T')[0];
+  const today = new Date();
+  const todayS = toStr(today);
+  const yest = new Date(today); yest.setDate(yest.getDate() - 1);
+  const yesterS = toStr(yest);
+  const set = new Set(logs.map((l) => l.date));
+  if (!set.has(todayS) && !set.has(yesterS)) return 0;
+  const start = set.has(todayS) ? todayS : yesterS;
+  let n = 0; const cur = new Date(start);
+  while (true) {
+    const ds = toStr(cur);
+    if (set.has(ds)) { n++; cur.setDate(cur.getDate() - 1); } else break;
+  }
+  return n;
+}
+
+function quickBestStreak(logs) {
+  if (!logs.length) return 0;
+  const dates = [...new Set(logs.map((l) => l.date))].sort();
+  let best = 1, cur = 1;
+  for (let i = 1; i < dates.length; i++) {
+    const diff = (new Date(dates[i]) - new Date(dates[i - 1])) / 86400000;
+    if (diff === 1) { cur++; if (cur > best) best = cur; } else cur = 1;
+  }
+  return best;
+}
+
+export default function ProfileScreen({ navigation }) {
+  const [profile,       setProfile]       = useState({ name: '', email: '', createdAt: '' });
+  const [shareData,     setShareData]     = useState({ shareCode: '', shareUrl: '' });
+  const [loading,       setLoading]       = useState(true);
+  const [saving,        setSaving]        = useState(false);
+  const [editMode,      setEditMode]      = useState(false);
+  const [editName,      setEditName]      = useState('');
+  const [nameFocused,   setNameFocused]   = useState(false);
+  const [stats,         setStats]         = useState({ habits: 0, totalDone: 0, bestStreak: 0 });
+  const [notifEnabled,  setNotifEnabled]  = useState(false);
+  const [reminderTime,  setReminderTime]  = useState('08:00');
+  const [darkMode,      setDarkMode]      = useState(true);
+  const [soundEnabled,  setSoundEnabled]  = useState(false);
+  const [copyText,      setCopyText]      = useState('Copy');
+  const [savingReminder, setSavingReminder] = useState(false);
+  const { isDark, toggleTheme } = useTheme();
+
+  // ── Fetch ───────────────────────────────────────────────────────────────────
+  const fetchAll = useCallback(async () => {
     try {
-      const [profileRes, habitsRes] = await Promise.all([
+      const [profileRes, habitsRes, shareRes] = await Promise.all([
         api.get('/api/user/profile'),
         api.get('/api/habits'),
+        api.get('/api/social/my-share').catch(() => ({ data: {} })),
       ]);
+
       const p = profileRes.data || {};
       setProfile(p);
       setEditName(p.name || '');
       setNotifEnabled(p.notificationsEnabled ?? false);
       setReminderTime(p.reminderTime || '08:00');
+      setShareData(shareRes.data || {});
+
+      // Load local notification settings
+      const remSettings = await getReminderSettings();
+      setNotifEnabled(remSettings.enabled);
+      setReminderTime(remSettings.time);
 
       const active = (habitsRes.data || []).filter((h) => h.isActive);
-      // Quick stats: fetch all logs in parallel
       const logResults = await Promise.all(
         active.map((h) => api.get(`/api/logs/${h._id}`).then((r) => r.data || [])),
       );
       const allLogs = logResults.flat();
       const totalDone = allLogs.filter((l) => l.status === 'done').length;
+      const bestStreak = logResults.reduce((m, logs) => Math.max(m, quickBestStreak(logs)), 0);
+      setStats({ habits: active.length, totalDone, bestStreak });
+    } catch (_) {}
 
-      // Current streak: max across habits
-      let maxStreak = 0;
-      for (const logs of logResults) {
-        const s = quickStreak(logs);
-        if (s > maxStreak) maxStreak = s;
-      }
-      setStats({ habits: active.length, totalDone, streak: maxStreak });
+    // Load AsyncStorage prefs
+    try {
+      const theme = await AsyncStorage.getItem('theme');
+      setDarkMode(theme !== 'light');
+      const sound = await AsyncStorage.getItem('soundEnabled');
+      setSoundEnabled(sound === 'true');
     } catch (_) {}
   }, []);
 
   useEffect(() => {
-    (async () => { setLoading(true); await fetchProfile(); setLoading(false); })();
-  }, [fetchProfile]);
+    (async () => { setLoading(true); await fetchAll(); setLoading(false); })();
+  }, [fetchAll]);
 
-  // ── Save name ────────────────────────────────────────────────────────────────
+  // ── Save name ───────────────────────────────────────────────────────────────
   const handleSaveName = useCallback(async () => {
     if (!editName.trim()) { Alert.alert('Required', 'Name cannot be empty.'); return; }
     setSaving(true);
     try {
-      await api.put('/api/user/profile', { name: editName.trim() });
+      await api.put('/api/auth/me', { name: editName.trim() });
       setProfile((p) => ({ ...p, name: editName.trim() }));
       setEditMode(false);
     } catch (err) {
       Alert.alert('Error', err.response?.data?.message || 'Failed to update name.');
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   }, [editName]);
 
-  // ── Save notification settings ───────────────────────────────────────────────
+  // ── Save notifications ──────────────────────────────────────────────────────
   const handleSaveNotif = useCallback(async (enabled, time) => {
-    try {
-      await api.put('/api/user/notifications', {
-        notificationsEnabled: enabled,
-        reminderTime: time,
-      });
-    } catch (_) {}
+    try { await api.put('/api/user/notifications', { notificationsEnabled: enabled, reminderTime: time }); }
+    catch (_) {}
   }, []);
 
-  // ── Logout ───────────────────────────────────────────────────────────────────
+  // ── Toggle dark mode ────────────────────────────────────────────────────────
+  const handleToggleDark = useCallback(async (val) => {
+    setDarkMode(val);
+    await AsyncStorage.setItem('theme', val ? 'dark' : 'light');
+  }, []);
+
+  // ── Toggle sound ────────────────────────────────────────────────────────────
+  const handleToggleSound = useCallback(async (val) => {
+    setSoundEnabled(val);
+    await AsyncStorage.setItem('soundEnabled', val ? 'true' : 'false');
+  }, []);
+
+  // ── Copy share URL ──────────────────────────────────────────────────────────
+  const handleCopy = useCallback(async () => {
+    const url = shareData.shareUrl || `${BASE_URL}/u/${shareData.shareCode}`;
+    await Clipboard.setStringAsync(url);
+    setCopyText('Copied!');
+    setTimeout(() => setCopyText('Copy'), 2000);
+  }, [shareData]);
+
+  // ── Share link ──────────────────────────────────────────────────────────────
+  const handleShare = useCallback(async () => {
+    const url = `${BASE_URL}/u/${shareData.shareCode}`;
+    try { await Share.share({ message: `Track my habits on StreakBoard! ${url}`, url }); }
+    catch (_) {}
+  }, [shareData.shareCode]);
+
+  // ── Logout ──────────────────────────────────────────────────────────────────
   const handleLogout = useCallback(() => {
     Alert.alert('Log out', 'Are you sure you want to log out?', [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Log out', style: 'destructive',
+        text: 'LOG OUT', style: 'destructive',
         onPress: async () => {
-          await SecureStore.deleteItemAsync('token');
-          setAuthToken(null);
-          navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+          try { await SecureStore.deleteItemAsync('token'); } catch (_) {}
+          try { setAuthToken(null); } catch (_) {}
+          // ProfileScreen lives inside Tab → Tab lives inside Root Stack.
+          // navigation.reset() would reset the Tab; we need the parent Stack.
+          const parent = navigation.getParent();
+          if (parent) {
+            parent.reset({ index: 0, routes: [{ name: 'Login' }] });
+          } else {
+            navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+          }
         },
       },
+
     ]);
   }, [navigation]);
 
   const initial = profile.name ? profile.name[0].toUpperCase() : '?';
+  const memberSince = profile.createdAt
+    ? new Date(profile.createdAt).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+    : '';
+  const profileUrl = shareData.shareUrl || `${BASE_URL}/u/${shareData.shareCode}`;
 
   if (loading) {
-    return (
-      <View style={s.center}><ActivityIndicator size="large" color={COLORS.primary} /></View>
-    );
+    return <View style={s.center}><ActivityIndicator size="large" color={COLORS.primary} /></View>;
   }
 
   return (
     <SafeAreaView style={s.safe}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} />
-      <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
+      <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled">
 
         {/* ── Avatar + name ── */}
         <View style={s.avatarSection}>
           <View style={s.avatarCircle}>
             <Text style={s.avatarText}>{initial}</Text>
           </View>
+
           {editMode ? (
             <View style={s.editRow}>
               <TextInput
@@ -133,10 +220,10 @@ export default function ProfileScreen({ navigation }) {
               <TouchableOpacity style={s.saveBtn} onPress={handleSaveName} disabled={saving} activeOpacity={0.85}>
                 {saving
                   ? <ActivityIndicator color={COLORS.textPrimary} size="small" />
-                  : <Text style={s.saveBtnTxt}>Save</Text>
-                }
+                  : <Text style={s.saveBtnTxt}>Save</Text>}
               </TouchableOpacity>
-              <TouchableOpacity style={s.cancelBtn} onPress={() => { setEditMode(false); setEditName(profile.name); }} activeOpacity={0.75}>
+              <TouchableOpacity style={s.cancelBtn}
+                onPress={() => { setEditMode(false); setEditName(profile.name); }} activeOpacity={0.75}>
                 <Text style={s.cancelBtnTxt}>✕</Text>
               </TouchableOpacity>
             </View>
@@ -155,7 +242,7 @@ export default function ProfileScreen({ navigation }) {
         <View style={s.statsGrid}>
           {[
             ['🏃', stats.habits, 'Habits'],
-            ['🔥', stats.streak, 'Best Streak'],
+            ['🔥', stats.bestStreak, 'Best Streak'],
             ['✅', stats.totalDone, 'Total Done'],
           ].map(([icon, val, lbl], i, arr) => (
             <React.Fragment key={lbl}>
@@ -169,75 +256,147 @@ export default function ProfileScreen({ navigation }) {
           ))}
         </View>
 
-        {/* ── Notifications ── */}
-        <View style={s.section}>
-          <Text style={s.sectionTitle}>Notifications</Text>
+        {/* ── Member since ── */}
+        {memberSince ? (
+          <View style={s.section}>
+            <View style={s.infoRow}>
+              <Text style={s.infoLabel}>📅 Member since</Text>
+              <Text style={s.infoVal}>{memberSince}</Text>
+            </View>
+          </View>
+        ) : null}
 
+        {/* ── Preferences ── */}
+        <View style={s.section}>
+          <Text style={s.sectionTitle}>PREFERENCES</Text>
           <View style={s.settingRow}>
             <View style={s.settingLeft}>
-              <Text style={s.settingLabel}>Daily reminder</Text>
-              <Text style={s.settingDesc}>Get a nudge to log your habits</Text>
+              <Text style={s.settingLabel}>🌙 Dark Mode</Text>
+              <Text style={s.settingDesc}>App appearance</Text>
             </View>
             <Switch
-              value={notifEnabled}
-              onValueChange={(val) => {
-                setNotifEnabled(val);
-                handleSaveNotif(val, reminderTime);
-              }}
+              value={isDark}
+              onValueChange={toggleTheme}
               trackColor={{ false: COLORS.border, true: COLORS.primary }}
               thumbColor={COLORS.textPrimary}
             />
           </View>
-
-          {notifEnabled && (
-            <View style={s.settingRow}>
-              <View style={s.settingLeft}>
-                <Text style={s.settingLabel}>Reminder time</Text>
-                <Text style={s.settingDesc}>24-hour format (e.g. 08:00)</Text>
-              </View>
-              <TextInput
-                style={s.timeInput}
-                value={reminderTime}
-                onChangeText={setReminderTime}
-                onBlur={() => handleSaveNotif(notifEnabled, reminderTime)}
-                keyboardType="numbers-and-punctuation"
-                maxLength={5}
-                fontSize={14}
-              />
+          <View style={s.divider} />
+          <View style={s.settingRow}>
+            <View style={s.settingLeft}>
+              <Text style={s.settingLabel}>🔊 Sound Effects</Text>
+              <Text style={s.settingDesc}>Play sounds on habit log</Text>
             </View>
+            <Switch
+              value={soundEnabled}
+              onValueChange={handleToggleSound}
+              trackColor={{ false: COLORS.border, true: COLORS.primary }}
+              thumbColor={COLORS.textPrimary}
+            />
+          </View>
+        </View>
+
+        {/* ── Notifications ── */}
+        <View style={s.section}>
+          <Text style={s.sectionTitle}>NOTIFICATIONS</Text>
+          <View style={s.settingRow}>
+            <View style={s.settingLeft}>
+              <Text style={s.settingLabel}>🔔 Daily Reminder</Text>
+              <Text style={s.settingDesc}>Get a nudge to log your habits</Text>
+            </View>
+            <Switch
+              value={notifEnabled}
+              onValueChange={handleReminderToggle}
+              trackColor={{ false: COLORS.border, true: COLORS.primary }}
+              thumbColor={COLORS.textPrimary}
+            />
+          </View>
+          {notifEnabled && (
+            <>
+              <View style={s.divider} />
+              <View style={s.settingRow}>
+                <Text style={[s.settingLabel, { color: COLORS.textSecondary, flex: 1 }]}>Remind me at:</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <TextInput
+                    style={s.timeInput}
+                    value={reminderTime}
+                    onChangeText={setReminderTime}
+                    keyboardType="numbers-and-punctuation"
+                    maxLength={5}
+                    fontSize={14}
+                    placeholder="20:00"
+                    placeholderTextColor={COLORS.textMuted}
+                  />
+                  <TouchableOpacity
+                    style={[s.saveTimeBtn, savingReminder && { opacity: 0.6 }]}
+                    onPress={handleReminderTimeSave}
+                    disabled={savingReminder}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={s.saveTimeBtnTxt}>{savingReminder ? '...' : 'Save'}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </>
           )}
         </View>
 
-        {/* ── Account ── */}
+        {/* ── Account info ── */}
         <View style={s.section}>
-          <Text style={s.sectionTitle}>Account</Text>
-
+          <Text style={s.sectionTitle}>ACCOUNT</Text>
           <View style={s.infoRow}>
             <Text style={s.infoLabel}>Email</Text>
             <Text style={s.infoVal} numberOfLines={1}>{profile.email}</Text>
           </View>
-
-          <View style={[s.infoRow, { borderBottomWidth: 0 }]}>
+          <View style={s.divider} />
+          <View style={s.infoRow}>
             <Text style={s.infoLabel}>Account type</Text>
             <View style={s.badge}>
-              <Text style={s.badgeTxt}>✉️ Email OTP</Text>
+              <Text style={s.badgeTxt}>✉ Email OTP</Text>
             </View>
           </View>
         </View>
 
-        {/* ── Danger zone ── */}
+        {/* ── Public profile / share ── */}
+        {shareData.shareCode ? (
+          <View style={s.section}>
+            <Text style={s.sectionTitle}>PUBLIC PROFILE</Text>
+            <View style={s.urlRow}>
+              <Text style={s.urlText} numberOfLines={1}>{profileUrl}</Text>
+              <TouchableOpacity style={s.copyBtn} onPress={handleCopy} activeOpacity={0.85}>
+                <Text style={s.copyBtnText}>{copyText}</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity style={s.shareLinkBtn} onPress={handleShare} activeOpacity={0.85}>
+              <Text style={s.shareLinkTxt}>🔗 Share Link</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {/* ── Friends + Journal links ── */}
         <View style={s.section}>
-          <Text style={s.sectionTitle}>Session</Text>
-          <TouchableOpacity style={s.logoutBtn} onPress={handleLogout} activeOpacity={0.85}>
-            <Text style={s.logoutBtnTxt}>Log out</Text>
+          <Text style={s.sectionTitle}>SOCIAL</Text>
+          <TouchableOpacity style={s.navRow} onPress={() => navigation.navigate('Friends')} activeOpacity={0.75}>
+            <Text style={s.navRowText}>👥 Friends & Share Code</Text>
+            <Text style={s.navRowArrow}>›</Text>
+          </TouchableOpacity>
+          <View style={s.divider} />
+          <TouchableOpacity style={s.navRow} onPress={() => navigation.navigate('Journal')} activeOpacity={0.75}>
+            <Text style={s.navRowText}>📓 My Journal</Text>
+            <Text style={s.navRowArrow}>›</Text>
           </TouchableOpacity>
         </View>
 
-        {/* ── App info ── */}
-        <View style={s.appInfo}>
-          <Text style={s.appInfoTxt}>🔥 StreakBoard</Text>
-          <Text style={s.appInfoSub}>Track what you do. Not what you plan.</Text>
-          <Text style={s.appInfoVersion}>Version 1.0.0</Text>
+        {/* ── Logout ── */}
+        <TouchableOpacity style={s.logoutBtn} onPress={handleLogout} activeOpacity={0.85}>
+          <Text style={s.logoutBtnTxt}>Log out</Text>
+        </TouchableOpacity>
+
+        {/* ── Footer ── */}
+        <View style={s.footer}>
+          <Text style={s.footerBrand}>🔥 StreakBoard</Text>
+          <Text style={s.footerTagline}>Track what you do. Not what you plan.</Text>
+          <Text style={s.footerVersion}>Version 1.0.0</Text>
         </View>
 
       </ScrollView>
@@ -245,27 +404,6 @@ export default function ProfileScreen({ navigation }) {
   );
 }
 
-// ── Mini streak helper ────────────────────────────────────────────────────────
-function quickStreak(logs) {
-  const toStr = (d) => d.toISOString().split('T')[0];
-  const today = new Date();
-  const todayS = toStr(today);
-  const yest = new Date(today);
-  yest.setDate(yest.getDate() - 1);
-  const yesterS = toStr(yest);
-  const set = new Set(logs.map((l) => l.date));
-  if (!set.has(todayS) && !set.has(yesterS)) return 0;
-  const start = set.has(todayS) ? todayS : yesterS;
-  let n = 0;
-  const cur = new Date(start);
-  while (true) {
-    const ds = toStr(cur);
-    if (set.has(ds)) { n++; cur.setDate(cur.getDate() - 1); } else break;
-  }
-  return n;
-}
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
   safe:    { flex: 1, backgroundColor: COLORS.bg },
   center:  { flex: 1, backgroundColor: COLORS.bg, alignItems: 'center', justifyContent: 'center' },
@@ -273,26 +411,24 @@ const s = StyleSheet.create({
   content: { paddingHorizontal: 20, paddingBottom: 100, paddingTop: 24 },
 
   // Avatar
-  avatarSection: { alignItems: 'center', marginBottom: 24 },
-  avatarCircle:  { width: 80, height: 80, borderRadius: 40, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
-  avatarText:    { color: COLORS.textPrimary, fontSize: 32, fontWeight: '700' },
+  avatarSection: { alignItems: 'center', marginBottom: 20 },
+  avatarCircle:  { width: 90, height: 90, borderRadius: 45, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', marginTop: 20, marginBottom: 12 },
+  avatarText:    { color: COLORS.textPrimary, fontSize: 36, fontWeight: '700' },
+  nameRow:       { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  profileName:   { color: COLORS.textPrimary, fontSize: 22, fontWeight: '700' },
+  editIcon:      { padding: 4 },
+  editIconTxt:   { fontSize: 16 },
+  profileEmail:  { color: COLORS.textMuted, fontSize: 13, marginTop: 4 },
+  editRow:       { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4, width: '100%' },
+  nameInput:     { flex: 1, backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: 12, height: 44, paddingHorizontal: 14, color: COLORS.textPrimary, fontSize: 16 },
+  nameInputFocused:{ borderColor: COLORS.primary },
+  saveBtn:       { backgroundColor: COLORS.primary, borderRadius: 10, paddingHorizontal: 14, height: 44, alignItems: 'center', justifyContent: 'center' },
+  saveBtnTxt:    { color: COLORS.textPrimary, fontWeight: '600', fontSize: 13 },
+  cancelBtn:     { backgroundColor: COLORS.card, borderRadius: 10, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: COLORS.border },
+  cancelBtnTxt:  { color: COLORS.textSecondary, fontSize: 16 },
 
-  nameRow:    { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
-  profileName:{ color: COLORS.textPrimary, fontSize: 20, fontWeight: '700' },
-  editIcon:   { padding: 4 },
-  editIconTxt:{ fontSize: 16 },
-  profileEmail:{ color: COLORS.textMuted, fontSize: 13 },
-
-  editRow:   { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
-  nameInput: { flex: 1, backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: 12, height: 44, paddingHorizontal: 14, color: COLORS.textPrimary, fontSize: 16 },
-  nameInputFocused: { borderColor: COLORS.primary },
-  saveBtn:   { backgroundColor: COLORS.primary, borderRadius: 10, paddingHorizontal: 14, height: 44, alignItems: 'center', justifyContent: 'center' },
-  saveBtnTxt:{ color: COLORS.textPrimary, fontWeight: '600', fontSize: 13 },
-  cancelBtn: { backgroundColor: COLORS.card, borderRadius: 10, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: COLORS.border },
-  cancelBtnTxt:{ color: COLORS.textSecondary, fontSize: 16 },
-
-  // Stats grid
-  statsGrid: { flexDirection: 'row', backgroundColor: COLORS.card, borderRadius: 16, borderWidth: 1, borderColor: COLORS.border, paddingVertical: 16, marginBottom: 20, alignItems: 'center' },
+  // Stats
+  statsGrid: { flexDirection: 'row', backgroundColor: COLORS.card, borderRadius: 14, borderWidth: 1, borderColor: COLORS.border, paddingVertical: 16, marginBottom: 12, alignItems: 'center' },
   statCell:  { flex: 1, alignItems: 'center' },
   statIcon:  { fontSize: 20, marginBottom: 4 },
   statNum:   { color: COLORS.textPrimary, fontSize: 20, fontWeight: '700' },
@@ -300,26 +436,44 @@ const s = StyleSheet.create({
   statDiv:   { width: 1, height: 40, backgroundColor: COLORS.border },
 
   // Sections
-  section:      { backgroundColor: COLORS.card, borderRadius: 16, borderWidth: 1, borderColor: COLORS.border, marginBottom: 16, overflow: 'hidden' },
-  sectionTitle: { color: COLORS.textSecondary, fontSize: 11, fontWeight: '600', letterSpacing: 0.8, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 6, textTransform: 'uppercase' },
+  section:      { backgroundColor: COLORS.card, borderRadius: 14, borderWidth: 1, borderColor: COLORS.border, marginBottom: 12, overflow: 'hidden' },
+  sectionTitle: { color: COLORS.textMuted, fontSize: 11, fontWeight: '600', letterSpacing: 1, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 8 },
+  divider:      { height: 1, backgroundColor: COLORS.border, marginHorizontal: 16 },
 
-  settingRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderTopWidth: 1, borderTopColor: COLORS.border },
+  settingRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 13 },
   settingLeft: { flex: 1, marginRight: 12 },
   settingLabel:{ color: COLORS.textPrimary, fontSize: 14, fontWeight: '500' },
   settingDesc: { color: COLORS.textMuted, fontSize: 12, marginTop: 2 },
-  timeInput:   { backgroundColor: COLORS.bg, borderWidth: 1, borderColor: COLORS.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, color: COLORS.textPrimary, minWidth: 64, textAlign: 'center' },
+  timeInput:    { backgroundColor: COLORS.bg, borderWidth: 1, borderColor: COLORS.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, color: COLORS.textPrimary, minWidth: 64, textAlign: 'center' },
+  saveTimeBtn:  { backgroundColor: COLORS.primary, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, marginLeft: 8 },
+  saveTimeBtnTxt: { color: COLORS.textPrimary, fontSize: 13, fontWeight: '600' },
 
-  infoRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderTopWidth: 1, borderTopColor: COLORS.border },
-  infoLabel: { color: COLORS.textSecondary, fontSize: 14 },
-  infoVal:   { color: COLORS.textPrimary, fontSize: 14, fontWeight: '500', maxWidth: '55%', textAlign: 'right' },
-  badge:     { backgroundColor: COLORS.primary + '22', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  badgeTxt:  { color: COLORS.primary, fontSize: 12, fontWeight: '600' },
+  infoRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 13 },
+  infoLabel:{ color: COLORS.textSecondary, fontSize: 13 },
+  infoVal:  { color: COLORS.textPrimary, fontSize: 13, fontWeight: '500', maxWidth: '55%', textAlign: 'right' },
+  badge:    { backgroundColor: COLORS.primary + '22', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
+  badgeTxt: { color: COLORS.primary, fontSize: 11, fontWeight: '600' },
 
-  logoutBtn:    { margin: 16, marginTop: 8, height: 48, borderRadius: 12, borderWidth: 1.5, borderColor: COLORS.danger, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.danger + '14' },
-  logoutBtnTxt: { color: COLORS.danger, fontSize: 15, fontWeight: '600' },
+  // Share
+  urlRow:      { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.bg, borderRadius: 10, marginHorizontal: 16, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10 },
+  urlText:     { flex: 1, color: COLORS.textSecondary, fontSize: 12 },
+  copyBtn:     { backgroundColor: COLORS.primary, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, marginLeft: 8 },
+  copyBtnText: { color: COLORS.textPrimary, fontSize: 12, fontWeight: '600' },
+  shareLinkBtn:{ borderWidth: 1, borderColor: COLORS.primary, borderRadius: 12, marginHorizontal: 16, marginBottom: 14, paddingVertical: 12, alignItems: 'center' },
+  shareLinkTxt:{ color: COLORS.primary, fontSize: 13, fontWeight: '600' },
 
-  appInfo:       { alignItems: 'center', marginTop: 8 },
-  appInfoTxt:    { color: COLORS.textMuted, fontSize: 14, fontWeight: '600' },
-  appInfoSub:    { color: COLORS.textMuted, fontSize: 11, marginTop: 4 },
-  appInfoVersion:{ color: COLORS.border, fontSize: 11, marginTop: 6 },
+  // Nav rows (Friends / Journal links)
+  navRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 },
+  navRowText: { color: COLORS.textPrimary, fontSize: 14, fontWeight: '500' },
+  navRowArrow:{ color: COLORS.textMuted, fontSize: 20 },
+
+  // Logout
+  logoutBtn:    { height: 54, borderRadius: 14, borderWidth: 1.5, borderColor: COLORS.danger, alignItems: 'center', justifyContent: 'center', marginTop: 16, marginBottom: 8 },
+  logoutBtnTxt: { color: COLORS.danger, fontSize: 16, fontWeight: '600' },
+
+  // Footer
+  footer:        { alignItems: 'center', marginTop: 20 },
+  footerBrand:   { color: COLORS.textMuted, fontSize: 13 },
+  footerTagline: { color: '#2a2a3a', fontSize: 11, marginTop: 4 },
+  footerVersion: { color: '#2a2a3a', fontSize: 10, marginTop: 2 },
 });

@@ -15,6 +15,7 @@ import {
   Animated,
 } from 'react-native';
 import api from '../lib/axios';
+import { playDoneSound, playMissedSound } from '../lib/sound';
 
 // ─── Color constants ──────────────────────────────────────────────────────────
 const COLORS = {
@@ -40,6 +41,23 @@ const COLOR_OPTIONS = [
   '#3b82f6','#ec4899','#14b8a6','#f97316',
 ];
 const PERIOD_OPTIONS = [30, 60, 90];
+
+const HABIT_SUGGESTIONS = [
+  { name: 'DSA Practice',    icon: '💻' },
+  { name: 'Morning Run',     icon: '🏃' },
+  { name: 'Read Books',      icon: '📚' },
+  { name: 'Meditation',      icon: '🧘' },
+  { name: 'Gym Workout',     icon: '💪' },
+  { name: 'Cold Shower',     icon: '🚿' },
+  { name: 'No Junk Food',    icon: '🥗' },
+  { name: 'Sleep by 11',     icon: '😴' },
+  { name: 'LeetCode',        icon: '🎯' },
+  { name: 'GitHub Commit',   icon: '👨‍💻' },
+  { name: 'No Social Media', icon: '🚫' },
+  { name: 'Drink Water',     icon: '💧' },
+  { name: 'Journal',         icon: '✍️' },
+  { name: 'Learn Skills',    icon: '🎨' },
+];
 
 // ─── Helper: streak calculation ───────────────────────────────────────────────
 function computeStreak(logs) {
@@ -92,6 +110,26 @@ function formattedDate() {
   });
 }
 
+// ─── Helper: short date "Tue, 28 Apr" ────────────────────────────────────────
+function shortDate() {
+  return new Date().toLocaleDateString('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  });
+}
+
+// ─── Retry helper ───────────────────────────────────────────────────────────
+async function apiWithRetry(fn, retries = 2) {
+  for (let i = 0; i <= retries; i++) {
+    try { return await fn(); }
+    catch (err) {
+      if (i === retries) throw err;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function DashboardScreen({ navigation }) {
   const [habits,      setHabits]      = useState([]);
@@ -103,7 +141,13 @@ export default function DashboardScreen({ navigation }) {
   const [newHabit,    setNewHabit]    = useState({
     name: '', icon: '💧', colorHex: '#10b981', trackingPeriod: 30,
   });
-  const [creating,    setCreating]    = useState(false);
+  const [creating,          setCreating]          = useState(false);
+  const [selectedSuggestion, setSelectedSuggestion] = useState(null);
+  const [showNoteModal,      setShowNoteModal]      = useState(false);
+  const [noteModalHabit,     setNoteModalHabit]     = useState(null);
+  const [noteText,           setNoteText]           = useState('');
+  const [noteSaving,         setNoteSaving]         = useState(false);
+  const [noteFocused,        setNoteFocused]        = useState(false);
   const progressAnim = useRef(new Animated.Value(0)).current;
 
   // ── Fetch all data ──────────────────────────────────────────────────────────
@@ -189,25 +233,28 @@ export default function DashboardScreen({ navigation }) {
         if (todayLog) {
           if (todayLog.status === status) {
             // Toggle off → DELETE
-            await api.delete(`/api/logs/${todayLog._id}`);
+            await apiWithRetry(() => api.delete(`/api/logs/${todayLog._id}`));
           } else {
             // Switch status → DELETE old + POST new
-            await api.delete(`/api/logs/${todayLog._id}`);
-            await api.post('/api/logs', {
+            await apiWithRetry(() => api.delete(`/api/logs/${todayLog._id}`));
+            await apiWithRetry(() => api.post('/api/logs', {
               habitId: habit._id,
               date:    todayStr(),
               status,
-            });
+            }));
           }
         } else {
           // No log yet → POST
-          await api.post('/api/logs', {
+          await apiWithRetry(() => api.post('/api/logs', {
             habitId: habit._id,
             date:    todayStr(),
             status,
-          });
+          }));
         }
         await refreshHabitLogs(habit._id);
+        // Play sound after successful log
+        if (status === 'done')   playDoneSound().catch(() => {});
+        if (status === 'missed') playMissedSound().catch(() => {});
       } catch (err) {
         Alert.alert('Error', 'Failed to update log. Please try again.');
       }
@@ -230,6 +277,7 @@ export default function DashboardScreen({ navigation }) {
         trackingPeriod: newHabit.trackingPeriod,
       });
       setShowAddModal(false);
+      setSelectedSuggestion(null);
       setNewHabit({ name: '', icon: '💧', colorHex: '#10b981', trackingPeriod: 30 });
       await fetchAll();
     } catch (err) {
@@ -238,6 +286,23 @@ export default function DashboardScreen({ navigation }) {
       setCreating(false);
     }
   }, [newHabit, fetchAll]);
+
+  // ── Save note ──────────────────────────────────────────────────────────────
+  const handleSaveNote = useCallback(async () => {
+    const todayLog = habitLogs[noteModalHabit?._id]?.todayLog;
+    if (!todayLog) {
+      Alert.alert('No log yet', 'Log the habit first (✓ or ✗) before adding a note.');
+      return;
+    }
+    setNoteSaving(true);
+    try {
+      await api.put(`/api/logs/${todayLog._id}/note`, { note: noteText.trim() });
+      setShowNoteModal(false); setNoteText(''); setNoteModalHabit(null);
+      await refreshHabitLogs(noteModalHabit._id);
+    } catch (_) {
+      Alert.alert('Error', 'Failed to save note.');
+    } finally { setNoteSaving(false); }
+  }, [habitLogs, noteModalHabit, noteText, refreshHabitLogs]);
 
   // ── Derived stats ───────────────────────────────────────────────────────────
   const statsDone   = habits.filter((h) => habitLogs[h._id]?.todayLog?.status === 'done').length;
@@ -294,6 +359,12 @@ export default function DashboardScreen({ navigation }) {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} />
 
+      {/* ── Navbar — pinned outside ScrollView ── */}
+      <View style={styles.navbar}>
+        <Text style={styles.navbarBrand}>🔥 StreakBoard</Text>
+        <Text style={styles.navbarDate}>{shortDate()}</Text>
+      </View>
+
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -307,6 +378,7 @@ export default function DashboardScreen({ navigation }) {
           />
         }
       >
+
         {/* ── Section 1: Header ── */}
         <View style={styles.header}>
           <View style={styles.headerLeft}>
@@ -506,7 +578,11 @@ export default function DashboardScreen({ navigation }) {
                   <TouchableOpacity
                     style={styles.iconBtn}
                     activeOpacity={0.75}
-                    onPress={() => Alert.alert('Coming Soon', 'Journal coming soon')}
+                    onPress={() => {
+                      setNoteText(habitLogs[habit._id]?.todayLog?.note || '');
+                      setNoteModalHabit(habit);
+                      setShowNoteModal(true);
+                    }}
                   >
                     <Text style={styles.iconBtnText}>📝</Text>
                   </TouchableOpacity>
@@ -515,7 +591,7 @@ export default function DashboardScreen({ navigation }) {
                   <TouchableOpacity
                     style={styles.iconBtn}
                     activeOpacity={0.75}
-                    onPress={() => navigation.navigate('Calendar')}
+                    onPress={() => navigation.navigate('Calendar', { habitId: habit._id })}
                   >
                     <Text style={styles.iconBtnText}>📅</Text>
                   </TouchableOpacity>
@@ -540,7 +616,7 @@ export default function DashboardScreen({ navigation }) {
         visible={showAddModal}
         animationType="slide"
         transparent
-        onRequestClose={() => setShowAddModal(false)}
+        onRequestClose={() => { setShowAddModal(false); setSelectedSuggestion(null); }}
       >
         <View style={styles.modalBackdrop}>
           <View style={styles.modalSheet}>
@@ -548,7 +624,7 @@ export default function DashboardScreen({ navigation }) {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>New Habit</Text>
               <TouchableOpacity
-                onPress={() => setShowAddModal(false)}
+                onPress={() => { setShowAddModal(false); setSelectedSuggestion(null); }}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
                 <Text style={styles.modalClose}>✕</Text>
@@ -558,6 +634,28 @@ export default function DashboardScreen({ navigation }) {
             <ScrollView showsVerticalScrollIndicator={false}>
               {/* 1. Habit name */}
               <Text style={styles.fieldLabel}>What habit?</Text>
+              <Text style={styles.suggestionsLabel}>Quick add:</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}
+                style={styles.suggestionsScroll} contentContainerStyle={{ paddingBottom: 8 }}>
+                {HABIT_SUGGESTIONS.map((s) => {
+                  const isSelected = selectedSuggestion === s.name;
+                  return (
+                    <TouchableOpacity
+                      key={s.name}
+                      style={[styles.suggestionChip, isSelected && styles.suggestionChipSelected]}
+                      onPress={() => {
+                        setSelectedSuggestion(s.name);
+                        setNewHabit((p) => ({ ...p, name: s.name, icon: s.icon }));
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.suggestionChipText, isSelected && styles.suggestionChipTextSelected]}>
+                        {s.icon} {s.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
               <TextInput
                 style={styles.fieldInput}
                 placeholder="e.g. Cold shower"
@@ -644,6 +742,50 @@ export default function DashboardScreen({ navigation }) {
                 )}
               </TouchableOpacity>
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Note Modal ── */}
+      <Modal
+        visible={showNoteModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => { setShowNoteModal(false); setNoteText(''); setNoteModalHabit(null); }}
+      >
+        <View style={styles.noteModalBackdrop}>
+          <View style={styles.noteModalSheet}>
+            <TouchableOpacity
+              style={styles.noteModalCloseBtn}
+              onPress={() => { setShowNoteModal(false); setNoteText(''); setNoteModalHabit(null); }}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text style={styles.noteModalCloseTxt}>✕</Text>
+            </TouchableOpacity>
+            <Text style={styles.noteModalTitle}>{noteModalHabit?.icon} {noteModalHabit?.name}</Text>
+            <Text style={styles.noteModalSub}>Note for today</Text>
+            <TextInput
+              style={[styles.noteInput, noteFocused && styles.noteInputFocused]}
+              value={noteText}
+              onChangeText={setNoteText}
+              placeholder="How did it go today?"
+              placeholderTextColor={COLORS.textMuted}
+              multiline
+              textAlignVertical="top"
+              fontSize={15}
+              onFocus={() => setNoteFocused(true)}
+              onBlur={() => setNoteFocused(false)}
+            />
+            <TouchableOpacity
+              style={[styles.noteSaveBtn, noteSaving && { opacity: 0.6 }]}
+              onPress={handleSaveNote}
+              disabled={noteSaving}
+              activeOpacity={0.85}
+            >
+              {noteSaving
+                ? <ActivityIndicator color={COLORS.textPrimary} />
+                : <Text style={styles.noteSaveBtnTxt}>Save Note</Text>}
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -1018,6 +1160,72 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
   },
+
+  // ── Navbar ──
+  navbar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 8,
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    marginBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1e1e2e',
+  },
+  navbarBrand: {
+    color: COLORS.primary,
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  navbarDate: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+  },
+
+  // ── Suggestion chips ──
+  suggestionsLabel: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    marginBottom: 6,
+    marginTop: 10,
+  },
+  suggestionsScroll: {
+    marginBottom: 10,
+  },
+  suggestionChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginRight: 8,
+    backgroundColor: COLORS.border,
+    borderWidth: 1,
+    borderColor: '#2a2a3a',
+  },
+  suggestionChipText: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+  },
+  suggestionChipSelected: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  suggestionChipTextSelected: {
+    color: COLORS.textPrimary,
+    fontWeight: '700',
+  },
+
+  // ── Note Modal ──
+  noteModalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  noteModalSheet: { backgroundColor: COLORS.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 36 },
+  noteModalCloseBtn: { position: 'absolute', top: 16, right: 20 },
+  noteModalCloseTxt: { color: COLORS.textMuted, fontSize: 20 },
+  noteModalTitle: { color: COLORS.textPrimary, fontSize: 16, fontWeight: '700', marginBottom: 4, marginTop: 8 },
+  noteModalSub: { color: COLORS.textMuted, fontSize: 12, marginBottom: 14 },
+  noteInput: { backgroundColor: COLORS.bg, borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12, color: COLORS.textPrimary, minHeight: 100, marginBottom: 16 },
+  noteInputFocused: { borderColor: COLORS.primary },
+  noteSaveBtn: { width: '100%', height: 50, backgroundColor: COLORS.primary, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  noteSaveBtnTxt: { color: COLORS.textPrimary, fontSize: 15, fontWeight: '700' },
 
   // ── Progress bar ──
   progressSection: {

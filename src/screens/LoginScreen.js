@@ -154,7 +154,7 @@ export default function LoginScreen({ navigation }) {
       const { token } = response.data;
       await SecureStore.setItemAsync('token', token);
       setAuthToken(token);
-      navigation.reset({ index: 0, routes: [{ name: 'Dashboard' }] });
+      navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
     } catch (err) {
       setError(
         err.response?.data?.message || 'Invalid OTP. Please try again.',
@@ -164,39 +164,68 @@ export default function LoginScreen({ navigation }) {
     }
   }, [email, otp, navigation]);
 
-  // ─── Google OAuth ────────────────────────────────────────────────────────────
   const handleGoogleLogin = useCallback(async () => {
     try {
+      setLoading(true);
+      setError(null);
+
       const redirectUrl = 'streakboard://auth/callback';
       const authUrl =
         'https://streakboard.onrender.com/api/auth/google' +
         '?redirectUrl=' + encodeURIComponent(redirectUrl);
 
+      // Listen for deep link BEFORE opening the browser.
+      // On Android, openAuthSessionAsync returns 'dismiss' even on success
+      // because the OS handles the deep link redirect separately.
+      const subscription = Linking.addEventListener('url', async ({ url }) => {
+        subscription.remove();
+        try {
+          let token = null;
+          const match = url.match(/[?&]token=([^&]+)/);
+          token = match ? decodeURIComponent(match[1]) : null;
+          if (token) {
+            await SecureStore.setItemAsync('token', token);
+            setAuthToken(token);
+            setLoading(false);
+            navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
+          } else {
+            setLoading(false);
+            setError('Google login failed. No token. Try OTP instead.');
+          }
+        } catch (_) {
+          setLoading(false);
+          setError('Google login failed. Try OTP instead.');
+        }
+      });
+
       const result = await WebBrowser.openAuthSessionAsync(
         authUrl,
         redirectUrl,
+        { showInRecents: false },
       );
 
+      // iOS: result.type === 'success' with the URL — handle here
       if (result.type === 'success' && result.url) {
-        // Use regex — new URL() can fail on custom schemes in some RN environments
-        const tokenMatch = result.url.match(/token=([^&]+)/);
-        const token = tokenMatch ? tokenMatch[1] : null;
-
+        subscription.remove();
+        const match = result.url.match(/[?&]token=([^&]+)/);
+        const token = match ? decodeURIComponent(match[1]) : null;
         if (token) {
           await SecureStore.setItemAsync('token', token);
           setAuthToken(token);
-          navigation.reset({ index: 0, routes: [{ name: 'Dashboard' }] });
-        } else {
-          setError('Google login failed. No token received.');
+          setLoading(false);
+          navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
+          return;
         }
-      } else if (result.type === 'cancel') {
-        // User closed browser — do nothing
-      } else {
-        setError('Google login failed. Try OTP instead.');
+      }
+
+      // Cancelled — wait 2s for deep link event before giving up
+      if (result.type === 'cancel' || result.type === 'dismiss') {
+        setTimeout(() => { subscription.remove(); setLoading(false); }, 2000);
       }
     } catch (err) {
       console.error('Google auth error:', err);
-      setError('Google login failed. Try OTP instead.');
+      setLoading(false);
+      setError('Google login failed. Please try OTP instead.');
     }
   }, [navigation]);
 
