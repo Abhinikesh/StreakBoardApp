@@ -1,52 +1,75 @@
 {
   "expo": {
-    "name": "StreakBoardApp",
+    "name": "StreakBoard",
     "slug": "StreakBoardApp",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "scheme": "streakboard",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+
+    "icon": "./assets/icon.png",
+
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#0d0d1a"
     },
+
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "bundleIdentifier": "com.abhinikesh.streakboard",
+      "buildNumber": "1"
     },
+
     "android": {
+      "package": "com.abhinikesh.streakboard",
+      "versionCode": 2,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#0d0d1a"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.abhinikesh.streakboard",
       "intentFilters": [
         {
           "action": "VIEW",
           "autoVerify": true,
-          "data": [
-            {
-              "scheme": "streakboard"
-            }
-          ],
+          "data": [{ "scheme": "streakboard" }],
           "category": ["BROWSABLE", "DEFAULT"]
         }
+      ],
+      "permissions": [
+        "RECEIVE_BOOT_COMPLETED",
+        "SCHEDULE_EXACT_ALARM",
+        "USE_EXACT_ALARM",
+        "VIBRATE"
       ]
     },
+
     "web": {
       "favicon": "./assets/favicon.png"
     },
+
     "plugins": [
       "expo-secure-store",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "color": "#7c3aed",
+          "defaultChannel": "default"
+        }
+      ]
     ],
+
     "extra": {
       "eas": {
         "projectId": "27a962d0-6352-42db-b556-f10ad839f899"
       }
+    },
+
+    "updates": {
+      "fallbackToCacheTimeout": 0
     }
   }
 }

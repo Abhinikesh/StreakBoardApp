@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -12,48 +12,41 @@ import StatsScreen       from '../screens/StatsScreen';
 import FriendsScreen     from '../screens/FriendsScreen';
 import LeaderboardScreen from '../screens/LeaderboardScreen';
 import ProfileScreen     from '../screens/ProfileScreen';
+import { useTheme, DARK } from '../context/ThemeContext';
+import SplashScreen from '../screens/SplashScreen';
 
 const Stack = createStackNavigator();
 const Tab   = createBottomTabNavigator();
 
-// ─── Tab config ───────────────────────────────────────────────────────────────
 const TABS = [
-  { name: 'Home',      label: 'Home',     emoji: '🏠', component: DashboardScreen },
-  { name: 'Calendar',  label: 'Calendar', emoji: '📅', component: CalendarScreen },
-  { name: 'Stats',     label: 'Stats',    emoji: '📊', component: StatsScreen },
-  { name: 'Friends',   label: 'Friends',  emoji: '👥', component: FriendsScreen },
-  { name: 'Ranks',     label: 'Ranks',    emoji: '🏆', component: LeaderboardScreen },
-  { name: 'Profile',   label: 'Profile',  emoji: '👤', component: ProfileScreen },
+  { name: 'Home',     label: 'Home',    emoji: '🏠', component: DashboardScreen },
+  { name: 'Calendar', label: 'Calendar',emoji: '📅', component: CalendarScreen },
+  { name: 'Stats',    label: 'Stats',   emoji: '📊', component: StatsScreen },
+  { name: 'Friends',  label: 'Friends', emoji: '👥', component: FriendsScreen },
+  { name: 'Ranks',    label: 'Ranks',   emoji: '🏆', component: LeaderboardScreen },
+  { name: 'Profile',  label: 'Profile', emoji: '👤', component: ProfileScreen },
 ];
 
-// ─── Main 6-tab navigator ─────────────────────────────────────────────────────
 function MainTabs() {
+  const { colors } = useTheme();
   return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: '#111120',
-          borderTopColor:  '#1e1e2e',
+          backgroundColor: colors.card,
+          borderTopColor:  colors.border,
           borderTopWidth:  1,
           height:          70,
           paddingBottom:   10,
           paddingTop:      6,
           position:        'absolute',
-          bottom:          0,
-          left:            0,
-          right:           0,
+          bottom: 0, left: 0, right: 0,
         },
-        tabBarActiveTintColor:   '#7c3aed',
-        tabBarInactiveTintColor: '#555555',
-        tabBarLabelStyle: {
-          fontSize:   10,
-          fontWeight: '600',
-          marginTop:  2,
-        },
-        tabBarIconStyle: {
-          marginBottom: 0,
-        },
+        tabBarActiveTintColor:   colors.primary,
+        tabBarInactiveTintColor: colors.textMuted,
+        tabBarLabelStyle: { fontSize: 10, fontWeight: '600', marginTop: 2 },
+        tabBarIconStyle:  { marginBottom: 0 },
       }}
     >
       {TABS.map(({ name, label, emoji, component }) => (
@@ -73,7 +66,6 @@ function MainTabs() {
   );
 }
 
-// ─── Root stack (Login → Main) ────────────────────────────────────────────────
 function RootStack({ initialRoute }) {
   return (
     <Stack.Navigator
@@ -86,14 +78,12 @@ function RootStack({ initialRoute }) {
   );
 }
 
-// ─── Loading screen ───────────────────────────────────────────────────────────
 function LoadingScreen() {
-  return <View style={s.loading} />;
+  return <SplashScreen />;
 }
 
-// ─── Root navigator ───────────────────────────────────────────────────────────
 export default function AppNavigator() {
-  const [status,       setStatus]       = useState('loading'); // 'loading' | 'auth' | 'main'
+  const [status, setStatus] = useState('loading');
 
   useEffect(() => {
     (async () => {
@@ -114,7 +104,3 @@ export default function AppNavigator() {
     </NavigationContainer>
   );
 }
-
-const s = StyleSheet.create({
-  loading: { flex: 1, backgroundColor: '#0d0d1a' },
-});

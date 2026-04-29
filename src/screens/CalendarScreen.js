@@ -5,19 +5,10 @@ import {
   SafeAreaView, StatusBar,
 } from 'react-native';
 import api from '../lib/axios';
-
-// ─── Colors ───────────────────────────────────────────────────────────────────
-const C = {
-  bg: '#0d0d1a', card: '#111120', border: '#1e1e2e',
-  primary: '#7c3aed', textPrimary: '#ffffff',
-  textSecondary: '#888888', textMuted: '#555555',
-  success: '#10b981', danger: '#ef4444',
-  dim: '#2a2a3a',
-};
+import { useTheme } from '../context/ThemeContext';
 
 const DAY_HEADERS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 function toStr(d) { return d.toISOString().split('T')[0]; }
 
 function buildCalendarDays(year, month, logs) {
@@ -88,23 +79,23 @@ function formatDayLabel(dateStr) {
   });
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
 export default function CalendarScreen({ navigation, route }) {
-  // Safe param extraction
+  const { colors } = useTheme();
+  const s = makeStyles(colors);
+
   const routeParams = (route && route.params) || {};
   const preselectedId = routeParams.habitId || null;
 
-  const [habits,         setHabits]         = useState([]);
-  const [selectedHabitId,setSelectedHabitId]= useState(null);
-  const [logs,           setLogs]           = useState([]);
-  const [currentMonth,   setCurrentMonth]   = useState(new Date());
-  const [loading,        setLoading]        = useState(true);
-  const [logsLoading,    setLogsLoading]    = useState(false);
-  const [selectedDay,    setSelectedDay]    = useState(null);
-  const [showDayModal,   setShowDayModal]   = useState(false);
-  const [actionLoading,  setActionLoading]  = useState(false);
+  const [habits,          setHabits]          = useState([]);
+  const [selectedHabitId, setSelectedHabitId] = useState(null);
+  const [logs,            setLogs]            = useState([]);
+  const [currentMonth,    setCurrentMonth]    = useState(new Date());
+  const [loading,         setLoading]         = useState(true);
+  const [logsLoading,     setLogsLoading]     = useState(false);
+  const [selectedDay,     setSelectedDay]     = useState(null);
+  const [showDayModal,    setShowDayModal]    = useState(false);
+  const [actionLoading,   setActionLoading]   = useState(false);
 
-  // ── Fetch habits ────────────────────────────────────────────────────────────
   const fetchHabits = useCallback(async () => {
     setLoading(true);
     try {
@@ -120,7 +111,6 @@ export default function CalendarScreen({ navigation, route }) {
 
   useEffect(() => { fetchHabits(); }, [fetchHabits]);
 
-  // ── Select habit after habits load ─────────────────────────────────────────
   useEffect(() => {
     if (!habits.length) return;
     const target =
@@ -130,7 +120,6 @@ export default function CalendarScreen({ navigation, route }) {
     setSelectedHabitId(target);
   }, [habits, preselectedId]);
 
-  // ── Fetch logs when habit selected ─────────────────────────────────────────
   const fetchLogs = useCallback(async (habitId) => {
     if (!habitId) return;
     setLogsLoading(true);
@@ -138,7 +127,6 @@ export default function CalendarScreen({ navigation, route }) {
       const res = await api.get(`/api/logs/${habitId}`);
       setLogs(Array.isArray(res.data) ? res.data : []);
     } catch (e) {
-      console.error('CalendarScreen: logs fetch error', e?.message);
       setLogs([]);
     } finally {
       setLogsLoading(false);
@@ -149,7 +137,6 @@ export default function CalendarScreen({ navigation, route }) {
     if (selectedHabitId) fetchLogs(selectedHabitId);
   }, [selectedHabitId, fetchLogs]);
 
-  // ── Month navigation ────────────────────────────────────────────────────────
   const today = new Date();
   const isCurrentMonth =
     currentMonth.getFullYear() === today.getFullYear() &&
@@ -163,7 +150,6 @@ export default function CalendarScreen({ navigation, route }) {
     setCurrentMonth((m) => { const n = new Date(m); n.setMonth(n.getMonth() + 1); return n; });
   }, [isCurrentMonth]);
 
-  // ── Day log action ──────────────────────────────────────────────────────────
   const selectedDayLog = logs.find((l) => l.date === selectedDay) || null;
 
   const handleDayLog = useCallback(async (status) => {
@@ -171,10 +157,8 @@ export default function CalendarScreen({ navigation, route }) {
     setActionLoading(true);
     try {
       if (selectedDayLog) {
-        if (selectedDayLog.status === status) {
-          await api.delete(`/api/logs/${selectedDayLog._id}`);
-        } else {
-          await api.delete(`/api/logs/${selectedDayLog._id}`);
+        await api.delete(`/api/logs/${selectedDayLog._id}`);
+        if (selectedDayLog.status !== status) {
           await api.post('/api/logs', { habitId: selectedHabitId, date: selectedDay, status });
         }
       } else {
@@ -189,7 +173,6 @@ export default function CalendarScreen({ navigation, route }) {
     }
   }, [selectedHabitId, selectedDay, selectedDayLog, fetchLogs]);
 
-  // ── Derived ─────────────────────────────────────────────────────────────────
   const year      = currentMonth.getFullYear();
   const monthIdx  = currentMonth.getMonth();
   const cells     = buildCalendarDays(year, monthIdx, logs);
@@ -201,31 +184,24 @@ export default function CalendarScreen({ navigation, route }) {
   const bestStreak = computeBestStreak(logs);
   const monthTitle = currentMonth.toLocaleString('default', { month: 'long', year: 'numeric' });
 
-  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={s.safe}>
-      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
 
-      {/* Navbar */}
       <View style={s.navbar}>
         <Text style={s.navbarBrand}>📅 Calendar</Text>
         <Text style={s.navbarDate}>{monthTitle}</Text>
       </View>
 
       {loading ? (
-        <View style={s.centered}><ActivityIndicator size="large" color={C.primary} /></View>
+        <View style={s.centered}><ActivityIndicator size="large" color={colors.primary} /></View>
       ) : habits.length === 0 ? (
         <View style={s.centered}>
           <Text style={s.emptyTitle}>No habits found</Text>
           <Text style={s.emptySub}>Add habits from the Home tab</Text>
         </View>
       ) : (
-        <ScrollView
-          style={s.scroll}
-          contentContainerStyle={s.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Habit pills */}
+        <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.pillScroll}>
             {habits.map((h) => {
               const sel = h._id === selectedHabitId;
@@ -242,7 +218,6 @@ export default function CalendarScreen({ navigation, route }) {
             })}
           </ScrollView>
 
-          {/* Month navigator */}
           <View style={s.monthNav}>
             <TouchableOpacity onPress={goPrev} style={s.monthBtn} activeOpacity={0.7}>
               <Text style={s.monthArrow}>{'<'}</Text>
@@ -258,44 +233,32 @@ export default function CalendarScreen({ navigation, route }) {
             </TouchableOpacity>
           </View>
 
-          {/* Calendar grid */}
           {logsLoading ? (
-            <View style={s.gridLoading}><ActivityIndicator color={C.primary} /></View>
+            <View style={s.gridLoading}><ActivityIndicator color={colors.primary} /></View>
           ) : (
             <View style={s.calBox}>
-              {/* Day headers */}
               <View style={s.dayHeaderRow}>
                 {DAY_HEADERS.map((d) => (
                   <Text key={d} style={s.dayHeader}>{d}</Text>
                 ))}
               </View>
-
-              {/* Day rows */}
               {rows.map((row, ri) => (
                 <View key={ri} style={s.calRow}>
                   {row.map((cell) => {
                     if (cell.empty) return <View key={cell.key} style={s.cellEmpty} />;
-
                     const { day, log, isToday, isFuture, dateStr } = cell;
                     const isDone   = log?.status === 'done';
                     const isMissed = log?.status === 'missed';
-
-                    // Background
                     let bg = 'transparent';
-                    if (isDone)        bg = C.success;
-                    else if (isMissed) bg = C.danger;
-                    else if (!isFuture) bg = C.border;
-
-                    // Border (today highlight)
+                    if (isDone)        bg = colors.success;
+                    else if (isMissed) bg = colors.danger;
+                    else if (!isFuture) bg = colors.border;
                     const todayBorder = isToday && !log;
                     const todayRing   = isToday && (isDone || isMissed);
-
-                    // Text color
-                    let txtColor = C.dim;
-                    if (isDone || isMissed)  txtColor = C.textPrimary;
-                    else if (isToday)        txtColor = C.primary;
-                    else if (!isFuture)      txtColor = C.textMuted;
-
+                    let txtColor = colors.borderHover;
+                    if (isDone || isMissed)  txtColor = colors.textPrimary;
+                    else if (isToday)        txtColor = colors.primary;
+                    else if (!isFuture)      txtColor = colors.textMuted;
                     return (
                       <TouchableOpacity
                         key={cell.key}
@@ -321,7 +284,6 @@ export default function CalendarScreen({ navigation, route }) {
             </View>
           )}
 
-          {/* Stats 2×2 */}
           <View style={s.statsBox}>
             <View style={[s.statCell, s.bRight, s.bBottom]}>
               <Text style={s.statNum}>{curStreak}</Text>
@@ -343,7 +305,6 @@ export default function CalendarScreen({ navigation, route }) {
         </ScrollView>
       )}
 
-      {/* Day Log Modal */}
       <Modal
         visible={showDayModal}
         animationType="slide"
@@ -362,40 +323,36 @@ export default function CalendarScreen({ navigation, route }) {
 
             {selectedDayLog && (
               <Text style={[s.currentStatus,
-                { color: selectedDayLog.status === 'done' ? C.success : C.danger }]}>
+                { color: selectedDayLog.status === 'done' ? colors.success : colors.danger }]}>
                 Currently: {selectedDayLog.status === 'done' ? '✓ Done' : '✗ Missed'}
               </Text>
             )}
 
             <View style={s.modalActions}>
-              {/* Done */}
               <TouchableOpacity
-                style={[s.actionBtn,
-                  selectedDayLog?.status === 'done' ? s.btnDoneFill : s.btnDoneOut]}
+                style={[s.actionBtn, selectedDayLog?.status === 'done' ? s.btnDoneFill : s.btnDoneOut]}
                 onPress={() => handleDayLog('done')}
                 disabled={actionLoading}
                 activeOpacity={0.8}
               >
                 {actionLoading
-                  ? <ActivityIndicator color={C.textPrimary} />
+                  ? <ActivityIndicator color={colors.textPrimary} />
                   : <Text style={[s.actionTxt,
-                      { color: selectedDayLog?.status === 'done' ? C.textPrimary : C.success }]}>
+                      { color: selectedDayLog?.status === 'done' ? colors.textPrimary : colors.success }]}>
                       ✓ Done
                     </Text>}
               </TouchableOpacity>
 
-              {/* Missed */}
               <TouchableOpacity
-                style={[s.actionBtn,
-                  selectedDayLog?.status === 'missed' ? s.btnMissedFill : s.btnMissedOut]}
+                style={[s.actionBtn, selectedDayLog?.status === 'missed' ? s.btnMissedFill : s.btnMissedOut]}
                 onPress={() => handleDayLog('missed')}
                 disabled={actionLoading}
                 activeOpacity={0.8}
               >
                 {actionLoading
-                  ? <ActivityIndicator color={C.textPrimary} />
+                  ? <ActivityIndicator color={colors.textPrimary} />
                   : <Text style={[s.actionTxt,
-                      { color: selectedDayLog?.status === 'missed' ? C.textPrimary : C.danger }]}>
+                      { color: selectedDayLog?.status === 'missed' ? colors.textPrimary : colors.danger }]}>
                       ✗ Missed
                     </Text>}
               </TouchableOpacity>
@@ -407,78 +364,70 @@ export default function CalendarScreen({ navigation, route }) {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-const s = StyleSheet.create({
-  safe:        { flex: 1, backgroundColor: C.bg },
-  scroll:      { flex: 1 },
+const makeStyles = (colors) => StyleSheet.create({
+  safe:          { flex: 1, backgroundColor: colors.bg },
+  scroll:        { flex: 1 },
   scrollContent: { paddingHorizontal: 20, paddingBottom: 120, paddingTop: 16 },
-  centered:    { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  centered:      { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  // Navbar
   navbar:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
                  paddingHorizontal: 20, paddingTop: 8, paddingBottom: 12,
-                 borderBottomWidth: 1, borderBottomColor: C.border },
-  navbarBrand: { color: C.primary, fontSize: 18, fontWeight: '800' },
-  navbarDate:  { color: C.textMuted, fontSize: 12 },
+                 borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.bg },
+  navbarBrand: { color: colors.primary, fontSize: 20, fontWeight: '800' },
+  navbarDate:  { color: colors.textMuted, fontSize: 12 },
 
-  // Empty
-  emptyTitle:  { color: C.textMuted, fontSize: 14, marginTop: 60 },
-  emptySub:    { color: C.dim, fontSize: 12, marginTop: 8 },
+  emptyTitle:  { color: colors.textMuted, fontSize: 14, marginTop: 60 },
+  emptySub:    { color: colors.borderHover, fontSize: 12, marginTop: 8 },
 
-  // Habit pills
   pillScroll:  { flexGrow: 0, marginBottom: 4 },
   pill:        { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginRight: 10,
-                 backgroundColor: C.card, borderWidth: 1, borderColor: C.border },
-  pillSel:     { backgroundColor: C.primary, borderColor: C.primary },
-  pillTxt:     { color: C.textSecondary, fontSize: 13 },
-  pillTxtSel:  { color: C.textPrimary, fontWeight: '600' },
+                 backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
+  pillSel:     { backgroundColor: colors.primary, borderColor: colors.primary },
+  pillTxt:     { color: colors.textSecondary, fontSize: 13 },
+  pillTxtSel:  { color: colors.textPrimary, fontWeight: '600' },
 
-  // Month nav
   monthNav:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
                  marginTop: 20, marginBottom: 12 },
   monthBtn:    { paddingHorizontal: 8, paddingVertical: 4 },
   monthBtnDisabled: { opacity: 0.3 },
-  monthArrow:  { color: C.primary, fontSize: 22, fontWeight: '700' },
-  monthArrowDim: { color: C.primary },
-  monthTitle:  { color: C.textPrimary, fontSize: 17, fontWeight: '700' },
+  monthArrow:  { color: colors.primary, fontSize: 22, fontWeight: '700' },
+  monthArrowDim: { color: colors.primary },
+  monthTitle:  { color: colors.textPrimary, fontSize: 17, fontWeight: '700' },
 
-  // Calendar
   calBox:      { marginBottom: 4 },
   dayHeaderRow:{ flexDirection: 'row', marginBottom: 4 },
-  dayHeader:   { flex: 1, color: C.textMuted, fontSize: 11, fontWeight: '500',
+  dayHeader:   { flex: 1, color: colors.textMuted, fontSize: 11, fontWeight: '500',
                  textAlign: 'center', paddingBottom: 8 },
   calRow:      { flexDirection: 'row', marginBottom: 4 },
   cell:        { flex: 1, aspectRatio: 1, margin: 2, borderRadius: 8,
                  alignItems: 'center', justifyContent: 'center' },
   cellEmpty:   { flex: 1, aspectRatio: 1, margin: 2 },
-  cellTodayBorder: { borderWidth: 1.5, borderColor: C.primary, backgroundColor: 'transparent' },
-  cellTodayRing:   { borderWidth: 2, borderColor: C.primary },
+  cellTodayBorder: { borderWidth: 1.5, borderColor: colors.primary, backgroundColor: 'transparent' },
+  cellTodayRing:   { borderWidth: 2, borderColor: colors.primary },
   cellTxt:     { fontSize: 13 },
   cellTxtBold: { fontWeight: '700' },
   gridLoading: { paddingVertical: 48, alignItems: 'center' },
 
-  // Stats
-  statsBox:    { flexDirection: 'row', flexWrap: 'wrap', backgroundColor: C.card,
+  statsBox:    { flexDirection: 'row', flexWrap: 'wrap', backgroundColor: colors.card,
                  borderRadius: 16, marginTop: 16, overflow: 'hidden' },
   statCell:    { width: '50%', paddingVertical: 16, alignItems: 'center' },
-  bRight:      { borderRightWidth: 1, borderRightColor: C.border },
-  bBottom:     { borderBottomWidth: 1, borderBottomColor: C.border },
-  statNum:     { color: C.textPrimary, fontSize: 22, fontWeight: '700' },
-  statLbl:     { color: C.textMuted, fontSize: 11, marginTop: 2 },
+  bRight:      { borderRightWidth: 1, borderRightColor: colors.border },
+  bBottom:     { borderBottomWidth: 1, borderBottomColor: colors.border },
+  statNum:     { color: colors.textPrimary, fontSize: 22, fontWeight: '700' },
+  statLbl:     { color: colors.textMuted, fontSize: 11, marginTop: 2 },
 
-  // Modal
   modalBg:     { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  modalSheet:  { backgroundColor: C.card, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+  modalSheet:  { backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24,
                  paddingHorizontal: 24, paddingTop: 20, paddingBottom: 40 },
   modalHead:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  modalDate:   { color: C.textPrimary, fontSize: 16, fontWeight: '700', flex: 1, marginRight: 8 },
-  modalX:      { color: C.textMuted, fontSize: 22 },
+  modalDate:   { color: colors.textPrimary, fontSize: 16, fontWeight: '700', flex: 1, marginRight: 8 },
+  modalX:      { color: colors.textMuted, fontSize: 22 },
   currentStatus: { fontSize: 13, marginTop: 12, marginBottom: 4 },
   modalActions:  { flexDirection: 'row', gap: 12, marginTop: 20 },
   actionBtn:   { flex: 1, height: 56, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  btnDoneFill: { backgroundColor: C.success },
-  btnDoneOut:  { borderWidth: 1.5, borderColor: C.success, backgroundColor: 'transparent' },
-  btnMissedFill: { backgroundColor: C.danger },
-  btnMissedOut:  { borderWidth: 1.5, borderColor: C.danger, backgroundColor: 'transparent' },
+  btnDoneFill: { backgroundColor: colors.success },
+  btnDoneOut:  { borderWidth: 1.5, borderColor: colors.success, backgroundColor: 'transparent' },
+  btnMissedFill: { backgroundColor: colors.danger },
+  btnMissedOut:  { borderWidth: 1.5, borderColor: colors.danger, backgroundColor: 'transparent' },
   actionTxt:   { fontSize: 15, fontWeight: '600' },
 });

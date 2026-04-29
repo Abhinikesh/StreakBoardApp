@@ -5,23 +5,14 @@ import {
   StatusBar, RefreshControl,
 } from 'react-native';
 import api from '../lib/axios';
-
-const COLORS = {
-  bg: '#0d0d1a', card: '#111120', border: '#1e1e2e',
-  primary: '#7c3aed', textPrimary: '#ffffff',
-  textSecondary: '#888888', textMuted: '#555555',
-  success: '#10b981', danger: '#ef4444',
-};
-
-// ─── Helper functions (outside component) ─────────────────────────────────────
+import { useTheme } from '../context/ThemeContext';
 
 function toDateStr(d) { return d.toISOString().split('T')[0]; }
 
 function computeStreak(logs) {
   const today = new Date();
   const todayS = toDateStr(today);
-  const yest = new Date(today);
-  yest.setDate(yest.getDate() - 1);
+  const yest = new Date(today); yest.setDate(yest.getDate() - 1);
   const yesterdayS = toDateStr(yest);
   const loggedDates = new Set(logs.map((l) => l.date));
   if (!loggedDates.has(todayS) && !loggedDates.has(yesterdayS)) return 0;
@@ -60,29 +51,30 @@ function buildHeatmap(allLogs) {
   return result;
 }
 
-function heatmapColor(count) {
-  if (count === 0) return COLORS.border;
-  if (count <= 2)  return COLORS.primary + '66'; // 0.4 opacity
-  if (count <= 4)  return COLORS.primary + 'b3'; // 0.7 opacity
-  return COLORS.primary;
+function heatmapColor(count, colors) {
+  if (count === 0) return colors.border;
+  if (count <= 2)  return colors.primary + '66';
+  if (count <= 4)  return colors.primary + 'b3';
+  return colors.primary;
 }
 
-// ─── Inline bar component ─────────────────────────────────────────────────────
-function Bar({ value, max, color }) {
+function Bar({ value, max, color, trackColor }) {
   const pct = max > 0 ? Math.min(value / max, 1) * 100 : 0;
   return (
-    <View style={barSt.track}>
+    <View style={[barSt.track, { backgroundColor: trackColor }]}>
       <View style={[barSt.fill, { width: `${Math.round(pct)}%`, backgroundColor: color }]} />
     </View>
   );
 }
 const barSt = StyleSheet.create({
-  track: { height: 6, borderRadius: 3, backgroundColor: '#1e1e2e', overflow: 'hidden', flex: 1 },
+  track: { height: 6, borderRadius: 3, overflow: 'hidden', flex: 1 },
   fill:  { height: 6, borderRadius: 3 },
 });
 
-// ─── Component ────────────────────────────────────────────────────────────────
 export default function StatsScreen() {
+  const { colors } = useTheme();
+  const s = makeStyles(colors);
+
   const [habits,     setHabits]     = useState([]);
   const [logsMap,    setLogsMap]    = useState({});
   const [loading,    setLoading]    = useState(true);
@@ -111,7 +103,6 @@ export default function StatsScreen() {
     setRefreshing(true); await fetchAll(); setRefreshing(false);
   }, [fetchAll]);
 
-  // ── Derived values ──────────────────────────────────────────────────────────
   const allLogs    = Object.values(logsMap).flat();
   const totalDone  = allLogs.filter((l) => l.status === 'done').length;
   const totalMiss  = allLogs.filter((l) => l.status === 'missed').length;
@@ -120,15 +111,13 @@ export default function StatsScreen() {
   const maxBest    = habits.reduce((m, h) => Math.max(m, computeBestStreak(logsMap[h._id] || [])), 1);
   const globalBest = maxBest;
 
-  const rateColor = (r) => r >= 80 ? COLORS.success : r >= 50 ? '#f59e0b' : COLORS.danger;
+  const rateColor   = (r) => r >= 80 ? colors.success : r >= 50 ? '#f59e0b' : colors.danger;
   const rateBadgeBg = (r) => r >= 80
-    ? COLORS.success + '33'
-    : r >= 50 ? '#f59e0b33' : COLORS.danger + '33';
+    ? colors.success + '33'
+    : r >= 50 ? '#f59e0b33' : colors.danger + '33';
 
-  // ── Heatmap data ────────────────────────────────────────────────────────────
   const heatmapData = buildHeatmap(allLogs);
 
-  // ── Best days (last 7) ──────────────────────────────────────────────────────
   const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const last7 = Array.from({ length: 7 }, (_, i) => {
     const d = new Date();
@@ -138,21 +127,16 @@ export default function StatsScreen() {
     return { label: DAY_SHORT[d.getDay()], count };
   });
   const maxDay = Math.max(...last7.map((d) => d.count), 1);
-
-  // ── Current month per-habit ─────────────────────────────────────────────────
-  const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+  const currentMonth = new Date().toISOString().slice(0, 7);
 
   if (loading) {
-    return (
-      <View style={s.center}><ActivityIndicator size="large" color={COLORS.primary} /></View>
-    );
+    return <View style={s.center}><ActivityIndicator size="large" color={colors.primary} /></View>;
   }
 
   return (
     <SafeAreaView style={s.safe}>
-      <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
 
-      {/* Navbar — pinned */}
       <View style={s.navbar}>
         <Text style={s.navBrand}>📊 Stats</Text>
         <Text style={s.navDate}>
@@ -164,9 +148,8 @@ export default function StatsScreen() {
         style={s.scroll}
         contentContainerStyle={s.content}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} colors={[COLORS.primary]} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} />}
       >
-        {/* ── Tab toggle ── */}
         <View style={s.tabRow}>
           {['overview', 'habits'].map((t) => (
             <TouchableOpacity key={t} style={[s.tab, tab === t && s.tabActive]}
@@ -186,18 +169,17 @@ export default function StatsScreen() {
           </View>
         ) : tab === 'overview' ? (
           <>
-            {/* ── 4-stat grid ── */}
             <View style={s.grid}>
               <View style={[s.cell, s.bRight, s.bBottom]}>
                 <Text style={s.cellNum}>{totalDone}</Text>
                 <Text style={s.cellLbl}>✅ Total Done</Text>
               </View>
               <View style={[s.cell, s.bBottom]}>
-                <Text style={[s.cellNum, { color: COLORS.danger }]}>{totalMiss}</Text>
+                <Text style={[s.cellNum, { color: colors.danger }]}>{totalMiss}</Text>
                 <Text style={s.cellLbl}>❌ Total Missed</Text>
               </View>
               <View style={[s.cell, s.bRight]}>
-                <Text style={[s.cellNum, { color: COLORS.success }]}>{overallPct}%</Text>
+                <Text style={[s.cellNum, { color: colors.success }]}>{overallPct}%</Text>
                 <Text style={s.cellLbl}>🎯 Completion</Text>
               </View>
               <View style={s.cell}>
@@ -206,7 +188,6 @@ export default function StatsScreen() {
               </View>
             </View>
 
-            {/* ── Feature 4: Streak badges ── */}
             <Text style={s.sectionLabel}>Achievements</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.badgesScroll}>
               {[
@@ -218,10 +199,10 @@ export default function StatsScreen() {
                 return (
                   <View key={milestone} style={[s.badgeCard, achieved && s.badgeCardAchieved]}>
                     <Text style={[s.badgeEmoji, !achieved && { opacity: 0.4 }]}>{emoji}</Text>
-                    <Text style={[s.badgeLabel, { color: achieved ? COLORS.primary : COLORS.textMuted }]}>
+                    <Text style={[s.badgeLabel, { color: achieved ? colors.primary : colors.textMuted }]}>
                       {label}
                     </Text>
-                    <Text style={[s.badgeStatus, { color: achieved ? COLORS.success : COLORS.textMuted }]}>
+                    <Text style={[s.badgeStatus, { color: achieved ? colors.success : colors.textMuted }]}>
                       {achieved ? 'Achieved!' : `${milestone - globalBest} more days`}
                     </Text>
                   </View>
@@ -229,47 +210,42 @@ export default function StatsScreen() {
               })}
             </ScrollView>
 
-            {/* ── Overall completion bar ── */}
             <View style={s.card}>
               <View style={s.rowBetween}>
                 <Text style={s.cardLbl}>Overall Completion</Text>
                 <Text style={[s.bigPct, { color: rateColor(overallPct) }]}>{overallPct}%</Text>
               </View>
-              <View style={s.barRow}><Bar value={overallPct} max={100} color={rateColor(overallPct)} /></View>
+              <View style={s.barRow}>
+                <Bar value={overallPct} max={100} color={rateColor(overallPct)} trackColor={colors.border} />
+              </View>
               <View style={s.rowBetween}>
                 <Text style={s.dimTxt}>{totalDone} done</Text>
                 <Text style={s.dimTxt}>{totalMiss} missed</Text>
               </View>
             </View>
 
-            {/* ── Done vs Missed split ── */}
             <View style={s.card}>
               <Text style={s.cardLbl}>Done vs Missed</Text>
               <View style={s.splitTrack}>
-                <View style={[s.splitFill, { flex: totalDone || 1, backgroundColor: COLORS.success, borderTopLeftRadius: 6, borderBottomLeftRadius: 6 }]} />
-                {totalMiss > 0 && <View style={[s.splitFill, { flex: totalMiss, backgroundColor: COLORS.danger, borderTopRightRadius: 6, borderBottomRightRadius: 6 }]} />}
+                <View style={[s.splitFill, { flex: totalDone || 1, backgroundColor: colors.success, borderTopLeftRadius: 6, borderBottomLeftRadius: 6 }]} />
+                {totalMiss > 0 && <View style={[s.splitFill, { flex: totalMiss, backgroundColor: colors.danger, borderTopRightRadius: 6, borderBottomRightRadius: 6 }]} />}
               </View>
               <View style={s.legendRow}>
-                <View style={s.legendItem}><View style={[s.dot, { backgroundColor: COLORS.success }]} /><Text style={s.legendTxt}>Done ({totalDone})</Text></View>
-                <View style={s.legendItem}><View style={[s.dot, { backgroundColor: COLORS.danger }]} /><Text style={s.legendTxt}>Missed ({totalMiss})</Text></View>
+                <View style={s.legendItem}><View style={[s.dot, { backgroundColor: colors.success }]} /><Text style={s.legendTxt}>Done ({totalDone})</Text></View>
+                <View style={s.legendItem}><View style={[s.dot, { backgroundColor: colors.danger }]} /><Text style={s.legendTxt}>Missed ({totalMiss})</Text></View>
               </View>
             </View>
 
-            {/* ── Feature 3: Best days bar chart ── */}
             <Text style={s.sectionLabel}>Your best days</Text>
             <View style={s.card}>
               <View style={s.bestDaysRow}>
                 {last7.map((day, i) => (
                   <View key={i} style={s.bestDayCol}>
-                    {day.count > 0 && (
-                      <Text style={s.bestDayCount}>{day.count}</Text>
-                    )}
+                    {day.count > 0 && <Text style={s.bestDayCount}>{day.count}</Text>}
                     <View style={s.bestDayBarContainer}>
                       <View style={[s.bestDayBar, {
-                        height: day.count > 0
-                          ? Math.max(3, Math.round((day.count / maxDay) * 80))
-                          : 3,
-                        backgroundColor: day.count > 0 ? COLORS.primary : COLORS.border,
+                        height: day.count > 0 ? Math.max(3, Math.round((day.count / maxDay) * 80)) : 3,
+                        backgroundColor: day.count > 0 ? colors.primary : colors.border,
                       }]} />
                     </View>
                     <Text style={s.bestDayLabel}>{day.label}</Text>
@@ -278,10 +254,8 @@ export default function StatsScreen() {
               </View>
             </View>
 
-            {/* ── Feature 2: Heatmap ── */}
             <Text style={s.sectionLabel}>Activity in last 12 weeks</Text>
             <View style={s.card}>
-              {/* Day labels on left + grid */}
               <View style={s.heatmapOuter}>
                 <View style={s.heatmapDayLabels}>
                   {['M', '', 'W', '', 'F', '', ''].map((lbl, i) => (
@@ -290,7 +264,6 @@ export default function StatsScreen() {
                 </View>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                   <View style={s.heatmapGrid}>
-                    {/* Build 12 columns of 7 rows */}
                     {Array.from({ length: 12 }, (_, week) => (
                       <View key={week} style={s.heatmapWeekCol}>
                         {Array.from({ length: 7 }, (_, day) => {
@@ -299,7 +272,7 @@ export default function StatsScreen() {
                           return (
                             <View
                               key={day}
-                              style={[s.heatmapCell, { backgroundColor: cell ? heatmapColor(cell.count) : COLORS.border }]}
+                              style={[s.heatmapCell, { backgroundColor: cell ? heatmapColor(cell.count, colors) : colors.border }]}
                             />
                           );
                         })}
@@ -308,35 +281,30 @@ export default function StatsScreen() {
                   </View>
                 </ScrollView>
               </View>
-              {/* Legend */}
               <View style={s.heatmapLegend}>
                 <Text style={s.heatmapLegendLbl}>Less</Text>
                 {[0, 1, 3, 5].map((v) => (
-                  <View key={v} style={[s.heatmapCell, { backgroundColor: heatmapColor(v), marginHorizontal: 2 }]} />
+                  <View key={v} style={[s.heatmapCell, { backgroundColor: heatmapColor(v, colors), marginHorizontal: 2 }]} />
                 ))}
                 <Text style={s.heatmapLegendLbl}>More</Text>
               </View>
             </View>
           </>
         ) : (
-          /* ── Feature 1: Per Habit full breakdown ── */
           habits.map((h) => {
             const logs       = logsMap[h._id] || [];
             const streak     = computeStreak(logs);
             const best       = computeBestStreak(logs);
-            const col        = h.colorHex || COLORS.primary;
+            const col        = h.colorHex || colors.primary;
             const thisMonth  = logs.filter((l) => l.date.startsWith(currentMonth));
             const monthDone  = thisMonth.filter((l) => l.status === 'done').length;
             const monthTotal = thisMonth.length;
             const rate       = monthTotal > 0 ? Math.round((monthDone / monthTotal) * 100) : 0;
             const totalHDone = logs.filter((l) => l.status === 'done').length;
-
             return (
               <View key={h._id} style={s.hCard}>
-                {/* Color accent bar */}
                 <View style={[s.hAccentBar, { backgroundColor: col }]} />
                 <View style={s.hBody}>
-                  {/* Header row */}
                   <View style={s.hHeader}>
                     <Text style={s.hIcon}>{h.icon}</Text>
                     <Text style={s.hName} numberOfLines={1}>{h.name}</Text>
@@ -344,16 +312,12 @@ export default function StatsScreen() {
                       <Text style={[s.rateBadgeTxt, { color: rateColor(rate) }]}>{rate}%</Text>
                     </View>
                   </View>
-
-                  {/* Progress bar */}
                   <View style={s.hProgressSection}>
                     <Text style={s.hProgressLabel}>This month completion</Text>
                     <View style={s.hProgressTrack}>
                       <View style={[s.hProgressFill, { width: `${rate}%`, backgroundColor: col }]} />
                     </View>
                   </View>
-
-                  {/* Mini stats row */}
                   <View style={s.miniRow}>
                     {[
                       ['🔥', streak, 'Current'],
@@ -380,99 +344,90 @@ export default function StatsScreen() {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-const s = StyleSheet.create({
-  safe:    { flex: 1, backgroundColor: COLORS.bg },
-  safe:    { flex: 1, backgroundColor: COLORS.bg },
-  center:  { flex: 1, backgroundColor: COLORS.bg, alignItems: 'center', justifyContent: 'center' },
+const makeStyles = (colors) => StyleSheet.create({
+  safe:    { flex: 1, backgroundColor: colors.bg },
+  center:  { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
   scroll:  { flex: 1 },
   content: { paddingHorizontal: 20, paddingBottom: 120, paddingTop: 16 },
 
   navbar:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
               paddingHorizontal: 20, paddingTop: 8, paddingBottom: 12,
-              borderBottomWidth: 1, borderBottomColor: '#1e1e2e', backgroundColor: COLORS.bg },
-  navBrand: { fontSize: 20, fontWeight: '800', color: COLORS.primary },
-  navDate:  { fontSize: 11, color: COLORS.textMuted },
+              borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.bg },
+  navBrand: { fontSize: 20, fontWeight: '800', color: colors.primary },
+  navDate:  { fontSize: 11, color: colors.textMuted },
 
-  tabRow:       { flexDirection: 'row', backgroundColor: COLORS.card, borderRadius: 12,
-                  padding: 4, marginBottom: 16 },
+  tabRow:       { flexDirection: 'row', backgroundColor: colors.card, borderRadius: 12, padding: 4, marginBottom: 16 },
   tab:          { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
-  tabActive:    { backgroundColor: COLORS.primary },
-  tabTxt:       { color: COLORS.textMuted, fontSize: 14, fontWeight: '600' },
-  tabTxtActive: { color: COLORS.textPrimary },
+  tabActive:    { backgroundColor: colors.primary },
+  tabTxt:       { color: colors.textMuted, fontSize: 14, fontWeight: '600' },
+  tabTxtActive: { color: colors.textPrimary },
 
   empty:     { alignItems: 'center', marginTop: 60 },
   emptyEmoji:{ fontSize: 48 },
-  emptyTitle:{ color: COLORS.textPrimary, fontSize: 18, fontWeight: '700', marginTop: 16 },
-  emptySub:  { color: COLORS.textMuted, fontSize: 14, marginTop: 8, textAlign: 'center' },
+  emptyTitle:{ color: colors.textPrimary, fontSize: 18, fontWeight: '700', marginTop: 16 },
+  emptySub:  { color: colors.textMuted, fontSize: 14, marginTop: 8, textAlign: 'center' },
 
-  sectionLabel: { color: COLORS.textMuted, fontSize: 12, marginBottom: 8, marginTop: 4 },
+  sectionLabel: { color: colors.textMuted, fontSize: 12, marginBottom: 8, marginTop: 4 },
 
-  // Grid
-  grid:    { flexDirection: 'row', flexWrap: 'wrap', backgroundColor: COLORS.card, borderRadius: 16, marginBottom: 14, overflow: 'hidden' },
+  grid:    { flexDirection: 'row', flexWrap: 'wrap', backgroundColor: colors.card, borderRadius: 16, marginBottom: 14, overflow: 'hidden' },
   cell:    { width: '50%', paddingVertical: 18, alignItems: 'center' },
-  bRight:  { borderRightWidth: 1, borderRightColor: COLORS.border },
-  bBottom: { borderBottomWidth: 1, borderBottomColor: COLORS.border },
-  cellNum: { color: COLORS.textPrimary, fontSize: 24, fontWeight: '700' },
-  cellLbl: { color: COLORS.textMuted, fontSize: 11, marginTop: 2 },
+  bRight:  { borderRightWidth: 1, borderRightColor: colors.border },
+  bBottom: { borderBottomWidth: 1, borderBottomColor: colors.border },
+  cellNum: { color: colors.textPrimary, fontSize: 24, fontWeight: '700' },
+  cellLbl: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
 
-  // Badges
   badgesScroll:      { marginBottom: 14 },
-  badgeCard:         { width: 80, alignItems: 'center', padding: 10, borderRadius: 12, marginRight: 10, backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, opacity: 0.6 },
-  badgeCardAchieved: { backgroundColor: COLORS.primary + '33', borderColor: COLORS.primary + '66', opacity: 1 },
+  badgeCard:         { width: 80, alignItems: 'center', padding: 10, borderRadius: 12, marginRight: 10, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, opacity: 0.6 },
+  badgeCardAchieved: { backgroundColor: colors.primary + '33', borderColor: colors.primary + '66', opacity: 1 },
   badgeEmoji:        { fontSize: 24, marginBottom: 4 },
   badgeLabel:        { fontSize: 11, fontWeight: '600', textAlign: 'center' },
   badgeStatus:       { fontSize: 9, marginTop: 2, textAlign: 'center' },
 
-  // Card
-  card:       { backgroundColor: COLORS.card, borderRadius: 16, borderWidth: 1, borderColor: COLORS.border, padding: 16, marginBottom: 14 },
-  cardLbl:    { color: COLORS.textSecondary, fontSize: 12, fontWeight: '600', marginBottom: 10 },
+  card:       { backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 14 },
+  cardLbl:    { color: colors.textSecondary, fontSize: 12, fontWeight: '600', marginBottom: 10 },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   bigPct:     { fontSize: 14, fontWeight: '700' },
   barRow:     { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  dimTxt:     { color: COLORS.textMuted, fontSize: 11 },
+  dimTxt:     { color: colors.textMuted, fontSize: 11 },
 
   splitTrack: { flexDirection: 'row', height: 12, borderRadius: 6, overflow: 'hidden', marginBottom: 12 },
   splitFill:  { height: 12 },
   legendRow:  { flexDirection: 'row', gap: 16 },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   dot:        { width: 8, height: 8, borderRadius: 4 },
-  legendTxt:  { color: COLORS.textMuted, fontSize: 12 },
+  legendTxt:  { color: colors.textMuted, fontSize: 12 },
 
-  // Best days bar chart
-  bestDaysRow:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
-  bestDayCol:        { flex: 1, alignItems: 'center' },
-  bestDayCount:      { color: COLORS.primary, fontSize: 10, fontWeight: '700', marginBottom: 2 },
+  bestDaysRow:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
+  bestDayCol:         { flex: 1, alignItems: 'center' },
+  bestDayCount:       { color: colors.primary, fontSize: 10, fontWeight: '700', marginBottom: 2 },
   bestDayBarContainer:{ height: 80, justifyContent: 'flex-end', marginBottom: 4 },
-  bestDayBar:        { width: 28, borderTopLeftRadius: 4, borderTopRightRadius: 4 },
-  bestDayLabel:      { color: COLORS.textMuted, fontSize: 10 },
+  bestDayBar:         { width: 28, borderTopLeftRadius: 4, borderTopRightRadius: 4 },
+  bestDayLabel:       { color: colors.textMuted, fontSize: 10 },
 
-  // Heatmap
   heatmapOuter:     { flexDirection: 'row' },
   heatmapDayLabels: { justifyContent: 'space-between', marginRight: 4, paddingVertical: 1 },
-  heatmapDayLbl:    { color: COLORS.textMuted, fontSize: 8, height: 14, lineHeight: 14 },
+  heatmapDayLbl:    { color: colors.textMuted, fontSize: 8, height: 14, lineHeight: 14 },
   heatmapGrid:      { flexDirection: 'row' },
   heatmapWeekCol:   { flexDirection: 'column', marginRight: 2 },
   heatmapCell:      { width: 12, height: 12, borderRadius: 2, margin: 1 },
   heatmapLegend:    { flexDirection: 'row', alignItems: 'center', marginTop: 10, justifyContent: 'flex-end' },
-  heatmapLegendLbl: { color: COLORS.textMuted, fontSize: 9, marginHorizontal: 4 },
+  heatmapLegendLbl: { color: colors.textMuted, fontSize: 9, marginHorizontal: 4 },
 
-  // Per-habit cards
-  hCard:          { flexDirection: 'row', backgroundColor: COLORS.card, borderRadius: 16, borderWidth: 1, borderColor: COLORS.border, marginBottom: 12, overflow: 'hidden' },
-  hAccentBar:     { width: 4, alignSelf: 'stretch' },
-  hBody:          { flex: 1, padding: 14 },
-  hHeader:        { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  hIcon:          { fontSize: 22, marginRight: 8 },
-  hName:          { flex: 1, color: COLORS.textPrimary, fontSize: 15, fontWeight: '600' },
-  rateBadge:      { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
-  rateBadgeTxt:   { fontSize: 12, fontWeight: '700' },
+  hCard:           { flexDirection: 'row', backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.border, marginBottom: 12, overflow: 'hidden' },
+  hAccentBar:      { width: 4, alignSelf: 'stretch' },
+  hBody:           { flex: 1, padding: 14 },
+  hHeader:         { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  hIcon:           { fontSize: 22, marginRight: 8 },
+  hName:           { flex: 1, color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
+  rateBadge:       { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  rateBadgeTxt:    { fontSize: 12, fontWeight: '700' },
   hProgressSection:{ marginBottom: 12 },
-  hProgressLabel: { color: COLORS.textMuted, fontSize: 11, marginBottom: 6 },
-  hProgressTrack: { height: 6, borderRadius: 3, backgroundColor: COLORS.border, overflow: 'hidden' },
-  hProgressFill:  { height: 6, borderRadius: 3 },
-  miniRow:        { flexDirection: 'row', backgroundColor: COLORS.bg, borderRadius: 10, padding: 8 },
-  mini:           { flex: 1, alignItems: 'center' },
-  miniNum:        { color: COLORS.textPrimary, fontSize: 16, fontWeight: '700' },
-  miniLbl:        { color: COLORS.textMuted, fontSize: 9, marginTop: 2, textAlign: 'center' },
-  miniDiv:        { width: 1, height: 32, backgroundColor: COLORS.border },
+  hProgressLabel:  { color: colors.textMuted, fontSize: 11, marginBottom: 6 },
+  hProgressTrack:  { height: 6, borderRadius: 3, backgroundColor: colors.border, overflow: 'hidden' },
+  hProgressFill:   { height: 6, borderRadius: 3 },
+  miniRow:         { flexDirection: 'row', backgroundColor: colors.bg, borderRadius: 10, padding: 8 },
+  mini:            { flex: 1, alignItems: 'center' },
+  miniNum:         { color: colors.textPrimary, fontSize: 16, fontWeight: '700' },
+  miniLbl:         { color: colors.textMuted, fontSize: 9, marginTop: 2, textAlign: 'center' },
+  miniDiv:         { width: 1, height: 32, backgroundColor: colors.border },
 });

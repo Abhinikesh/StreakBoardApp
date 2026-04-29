@@ -16,33 +16,14 @@ import {
   getReminderSettings,
 } from '../lib/notifications';
 
-const COLORS = {
-  bg: '#0d0d1a', card: '#111120', border: '#1e1e2e',
-  primary: '#7c3aed', textPrimary: '#ffffff',
-  textSecondary: '#888888', textMuted: '#555555',
-  success: '#10b981', danger: '#ef4444',
-};
-
 const BASE_URL = 'https://streak-o.vercel.app';
 
-function quickStreak(logs) {
-  const toStr = (d) => d.toISOString().split('T')[0];
-  const today = new Date();
-  const todayS = toStr(today);
-  const yest = new Date(today); yest.setDate(yest.getDate() - 1);
-  const yesterS = toStr(yest);
-  const set = new Set(logs.map((l) => l.date));
-  if (!set.has(todayS) && !set.has(yesterS)) return 0;
-  const start = set.has(todayS) ? todayS : yesterS;
-  let n = 0; const cur = new Date(start);
-  while (true) {
-    const ds = toStr(cur);
-    if (set.has(ds)) { n++; cur.setDate(cur.getDate() - 1); } else break;
-  }
-  return n;
+function getAvatarColor(name) {
+  const palette = ['#7c3aed','#10b981','#ef4444','#f59e0b','#3b82f6','#ec4899','#14b8a6','#f97316'];
+  return palette[(name?.charCodeAt(0) || 0) % palette.length];
 }
 
-function quickBestStreak(logs) {
+function computeBestStreak(logs) {
   if (!logs.length) return 0;
   const dates = [...new Set(logs.map((l) => l.date))].sort();
   let best = 1, cur = 1;
@@ -54,23 +35,23 @@ function quickBestStreak(logs) {
 }
 
 export default function ProfileScreen({ navigation }) {
-  const [profile,       setProfile]       = useState({ name: '', email: '', createdAt: '' });
-  const [shareData,     setShareData]     = useState({ shareCode: '', shareUrl: '' });
-  const [loading,       setLoading]       = useState(true);
-  const [saving,        setSaving]        = useState(false);
-  const [editMode,      setEditMode]      = useState(false);
-  const [editName,      setEditName]      = useState('');
-  const [nameFocused,   setNameFocused]   = useState(false);
-  const [stats,         setStats]         = useState({ habits: 0, totalDone: 0, bestStreak: 0 });
-  const [notifEnabled,  setNotifEnabled]  = useState(false);
-  const [reminderTime,  setReminderTime]  = useState('08:00');
-  const [darkMode,      setDarkMode]      = useState(true);
-  const [soundEnabled,  setSoundEnabled]  = useState(false);
-  const [copyText,      setCopyText]      = useState('Copy');
-  const [savingReminder, setSavingReminder] = useState(false);
-  const { isDark, toggleTheme } = useTheme();
+  const { colors, isDark, toggleTheme } = useTheme();
+  const s = makeStyles(colors);
 
-  // ── Fetch ───────────────────────────────────────────────────────────────────
+  const [profile,        setProfile]        = useState({ name: '', email: '', createdAt: '' });
+  const [shareData,      setShareData]      = useState({ shareCode: '', shareUrl: '' });
+  const [loading,        setLoading]        = useState(true);
+  const [saving,         setSaving]         = useState(false);
+  const [editMode,       setEditMode]       = useState(false);
+  const [editName,       setEditName]       = useState('');
+  const [nameFocused,    setNameFocused]    = useState(false);
+  const [stats,          setStats]          = useState({ habits: 0, totalDone: 0, bestStreak: 0 });
+  const [notifEnabled,   setNotifEnabled]   = useState(false);
+  const [reminderTime,   setReminderTime]   = useState('20:00');
+  const [soundEnabled,   setSoundEnabled]   = useState(false);
+  const [copyText,       setCopyText]       = useState('Copy');
+  const [savingReminder, setSavingReminder] = useState(false);
+
   const fetchAll = useCallback(async () => {
     try {
       const [profileRes, habitsRes, shareRes] = await Promise.all([
@@ -82,29 +63,23 @@ export default function ProfileScreen({ navigation }) {
       const p = profileRes.data || {};
       setProfile(p);
       setEditName(p.name || '');
-      setNotifEnabled(p.notificationsEnabled ?? false);
-      setReminderTime(p.reminderTime || '08:00');
       setShareData(shareRes.data || {});
 
-      // Load local notification settings
       const remSettings = await getReminderSettings();
       setNotifEnabled(remSettings.enabled);
       setReminderTime(remSettings.time);
 
-      const active = (habitsRes.data || []).filter((h) => h.isActive);
+      const active = (habitsRes.data || []).filter((h) => h.isActive !== false);
       const logResults = await Promise.all(
-        active.map((h) => api.get(`/api/logs/${h._id}`).then((r) => r.data || [])),
+        active.map((h) => api.get(`/api/logs/${h._id}`).then((r) => r.data || []).catch(() => [])),
       );
       const allLogs = logResults.flat();
       const totalDone = allLogs.filter((l) => l.status === 'done').length;
-      const bestStreak = logResults.reduce((m, logs) => Math.max(m, quickBestStreak(logs)), 0);
+      const bestStreak = logResults.reduce((m, logs) => Math.max(m, computeBestStreak(logs)), 0);
       setStats({ habits: active.length, totalDone, bestStreak });
     } catch (_) {}
 
-    // Load AsyncStorage prefs
     try {
-      const theme = await AsyncStorage.getItem('theme');
-      setDarkMode(theme !== 'light');
       const sound = await AsyncStorage.getItem('soundEnabled');
       setSoundEnabled(sound === 'true');
     } catch (_) {}
@@ -114,7 +89,6 @@ export default function ProfileScreen({ navigation }) {
     (async () => { setLoading(true); await fetchAll(); setLoading(false); })();
   }, [fetchAll]);
 
-  // ── Save name ───────────────────────────────────────────────────────────────
   const handleSaveName = useCallback(async () => {
     if (!editName.trim()) { Alert.alert('Required', 'Name cannot be empty.'); return; }
     setSaving(true);
@@ -127,25 +101,37 @@ export default function ProfileScreen({ navigation }) {
     } finally { setSaving(false); }
   }, [editName]);
 
-  // ── Save notifications ──────────────────────────────────────────────────────
-  const handleSaveNotif = useCallback(async (enabled, time) => {
-    try { await api.put('/api/user/notifications', { notificationsEnabled: enabled, reminderTime: time }); }
-    catch (_) {}
-  }, []);
+  const handleReminderToggle = useCallback(async (value) => {
+    if (value) {
+      const granted = await requestNotificationPermission();
+      if (!granted) {
+        Alert.alert('Permission needed',
+          'Please allow notifications in Settings to get daily habit reminders.',
+          [{ text: 'OK' }]);
+        return;
+      }
+      setNotifEnabled(true);
+      const success = await scheduleHabitReminder(reminderTime);
+      if (success) Alert.alert('✅ Reminder set', `You'll get a reminder every day at ${reminderTime}`);
+    } else {
+      await cancelHabitReminder();
+      setNotifEnabled(false);
+    }
+  }, [reminderTime]);
 
-  // ── Toggle dark mode ────────────────────────────────────────────────────────
-  const handleToggleDark = useCallback(async (val) => {
-    setDarkMode(val);
-    await AsyncStorage.setItem('theme', val ? 'dark' : 'light');
-  }, []);
+  const handleReminderTimeSave = useCallback(async () => {
+    if (!notifEnabled) return;
+    setSavingReminder(true);
+    const success = await scheduleHabitReminder(reminderTime);
+    setSavingReminder(false);
+    if (success) Alert.alert('✅ Updated', `Reminder updated to ${reminderTime}`);
+  }, [notifEnabled, reminderTime]);
 
-  // ── Toggle sound ────────────────────────────────────────────────────────────
   const handleToggleSound = useCallback(async (val) => {
     setSoundEnabled(val);
     await AsyncStorage.setItem('soundEnabled', val ? 'true' : 'false');
   }, []);
 
-  // ── Copy share URL ──────────────────────────────────────────────────────────
   const handleCopy = useCallback(async () => {
     const url = shareData.shareUrl || `${BASE_URL}/u/${shareData.shareCode}`;
     await Clipboard.setStringAsync(url);
@@ -153,14 +139,12 @@ export default function ProfileScreen({ navigation }) {
     setTimeout(() => setCopyText('Copy'), 2000);
   }, [shareData]);
 
-  // ── Share link ──────────────────────────────────────────────────────────────
   const handleShare = useCallback(async () => {
     const url = `${BASE_URL}/u/${shareData.shareCode}`;
     try { await Share.share({ message: `Track my habits on StreakBoard! ${url}`, url }); }
     catch (_) {}
   }, [shareData.shareCode]);
 
-  // ── Logout ──────────────────────────────────────────────────────────────────
   const handleLogout = useCallback(() => {
     Alert.alert('Log out', 'Are you sure you want to log out?', [
       { text: 'Cancel', style: 'cancel' },
@@ -169,8 +153,6 @@ export default function ProfileScreen({ navigation }) {
         onPress: async () => {
           try { await SecureStore.deleteItemAsync('token'); } catch (_) {}
           try { setAuthToken(null); } catch (_) {}
-          // ProfileScreen lives inside Tab → Tab lives inside Root Stack.
-          // navigation.reset() would reset the Tab; we need the parent Stack.
           const parent = navigation.getParent();
           if (parent) {
             parent.reset({ index: 0, routes: [{ name: 'Login' }] });
@@ -179,29 +161,29 @@ export default function ProfileScreen({ navigation }) {
           }
         },
       },
-
     ]);
   }, [navigation]);
 
-  const initial = profile.name ? profile.name[0].toUpperCase() : '?';
+  const avatarBg   = getAvatarColor(profile.name);
+  const initial    = profile.name ? profile.name[0].toUpperCase() : '?';
   const memberSince = profile.createdAt
-    ? new Date(profile.createdAt).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-    : '';
+    ? new Date(profile.createdAt).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
+    : 'April 2026';
   const profileUrl = shareData.shareUrl || `${BASE_URL}/u/${shareData.shareCode}`;
 
   if (loading) {
-    return <View style={s.center}><ActivityIndicator size="large" color={COLORS.primary} /></View>;
+    return <View style={s.center}><ActivityIndicator size="large" color={colors.primary} /></View>;
   }
 
   return (
     <SafeAreaView style={s.safe}>
-      <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
       <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled">
 
-        {/* ── Avatar + name ── */}
+        {/* Avatar + name */}
         <View style={s.avatarSection}>
-          <View style={s.avatarCircle}>
+          <View style={[s.avatarCircle, { backgroundColor: avatarBg }]}>
             <Text style={s.avatarText}>{initial}</Text>
           </View>
 
@@ -213,13 +195,13 @@ export default function ProfileScreen({ navigation }) {
                 onChangeText={setEditName}
                 autoFocus
                 fontSize={16}
-                placeholderTextColor={COLORS.textMuted}
+                placeholderTextColor={colors.textMuted}
                 onFocus={() => setNameFocused(true)}
                 onBlur={() => setNameFocused(false)}
               />
               <TouchableOpacity style={s.saveBtn} onPress={handleSaveName} disabled={saving} activeOpacity={0.85}>
                 {saving
-                  ? <ActivityIndicator color={COLORS.textPrimary} size="small" />
+                  ? <ActivityIndicator color={colors.textPrimary} size="small" />
                   : <Text style={s.saveBtnTxt}>Save</Text>}
               </TouchableOpacity>
               <TouchableOpacity style={s.cancelBtn}
@@ -238,7 +220,7 @@ export default function ProfileScreen({ navigation }) {
           <Text style={s.profileEmail}>{profile.email}</Text>
         </View>
 
-        {/* ── Quick stats ── */}
+        {/* Quick stats */}
         <View style={s.statsGrid}>
           {[
             ['🏃', stats.habits, 'Habits'],
@@ -256,17 +238,15 @@ export default function ProfileScreen({ navigation }) {
           ))}
         </View>
 
-        {/* ── Member since ── */}
-        {memberSince ? (
-          <View style={s.section}>
-            <View style={s.infoRow}>
-              <Text style={s.infoLabel}>📅 Member since</Text>
-              <Text style={s.infoVal}>{memberSince}</Text>
-            </View>
+        {/* Member since */}
+        <View style={s.section}>
+          <View style={s.infoRow}>
+            <Text style={s.infoLabel}>📅 Member since</Text>
+            <Text style={s.infoVal}>{memberSince}</Text>
           </View>
-        ) : null}
+        </View>
 
-        {/* ── Preferences ── */}
+        {/* Preferences */}
         <View style={s.section}>
           <Text style={s.sectionTitle}>PREFERENCES</Text>
           <View style={s.settingRow}>
@@ -277,8 +257,8 @@ export default function ProfileScreen({ navigation }) {
             <Switch
               value={isDark}
               onValueChange={toggleTheme}
-              trackColor={{ false: COLORS.border, true: COLORS.primary }}
-              thumbColor={COLORS.textPrimary}
+              trackColor={{ false: colors.border, true: colors.primary }}
+              thumbColor={colors.textPrimary}
             />
           </View>
           <View style={s.divider} />
@@ -290,13 +270,13 @@ export default function ProfileScreen({ navigation }) {
             <Switch
               value={soundEnabled}
               onValueChange={handleToggleSound}
-              trackColor={{ false: COLORS.border, true: COLORS.primary }}
-              thumbColor={COLORS.textPrimary}
+              trackColor={{ false: colors.border, true: colors.primary }}
+              thumbColor={colors.textPrimary}
             />
           </View>
         </View>
 
-        {/* ── Notifications ── */}
+        {/* Notifications */}
         <View style={s.section}>
           <Text style={s.sectionTitle}>NOTIFICATIONS</Text>
           <View style={s.settingRow}>
@@ -307,15 +287,15 @@ export default function ProfileScreen({ navigation }) {
             <Switch
               value={notifEnabled}
               onValueChange={handleReminderToggle}
-              trackColor={{ false: COLORS.border, true: COLORS.primary }}
-              thumbColor={COLORS.textPrimary}
+              trackColor={{ false: colors.border, true: colors.primary }}
+              thumbColor={colors.textPrimary}
             />
           </View>
           {notifEnabled && (
             <>
               <View style={s.divider} />
               <View style={s.settingRow}>
-                <Text style={[s.settingLabel, { color: COLORS.textSecondary, flex: 1 }]}>Remind me at:</Text>
+                <Text style={[s.settingLabel, { color: colors.textSecondary, flex: 1 }]}>Remind me at:</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <TextInput
                     style={s.timeInput}
@@ -325,7 +305,7 @@ export default function ProfileScreen({ navigation }) {
                     maxLength={5}
                     fontSize={14}
                     placeholder="20:00"
-                    placeholderTextColor={COLORS.textMuted}
+                    placeholderTextColor={colors.textMuted}
                   />
                   <TouchableOpacity
                     style={[s.saveTimeBtn, savingReminder && { opacity: 0.6 }]}
@@ -341,7 +321,7 @@ export default function ProfileScreen({ navigation }) {
           )}
         </View>
 
-        {/* ── Account info ── */}
+        {/* Account */}
         <View style={s.section}>
           <Text style={s.sectionTitle}>ACCOUNT</Text>
           <View style={s.infoRow}>
@@ -351,13 +331,11 @@ export default function ProfileScreen({ navigation }) {
           <View style={s.divider} />
           <View style={s.infoRow}>
             <Text style={s.infoLabel}>Account type</Text>
-            <View style={s.badge}>
-              <Text style={s.badgeTxt}>✉ Email OTP</Text>
-            </View>
+            <View style={s.badge}><Text style={s.badgeTxt}>✉ Email OTP</Text></View>
           </View>
         </View>
 
-        {/* ── Public profile / share ── */}
+        {/* Public profile */}
         {shareData.shareCode ? (
           <View style={s.section}>
             <Text style={s.sectionTitle}>PUBLIC PROFILE</Text>
@@ -373,7 +351,7 @@ export default function ProfileScreen({ navigation }) {
           </View>
         ) : null}
 
-        {/* ── Friends + Journal links ── */}
+        {/* Social nav */}
         <View style={s.section}>
           <Text style={s.sectionTitle}>SOCIAL</Text>
           <TouchableOpacity style={s.navRow} onPress={() => navigation.navigate('Friends')} activeOpacity={0.75}>
@@ -387,12 +365,12 @@ export default function ProfileScreen({ navigation }) {
           </TouchableOpacity>
         </View>
 
-        {/* ── Logout ── */}
+        {/* Logout */}
         <TouchableOpacity style={s.logoutBtn} onPress={handleLogout} activeOpacity={0.85}>
           <Text style={s.logoutBtnTxt}>Log out</Text>
         </TouchableOpacity>
 
-        {/* ── Footer ── */}
+        {/* Footer */}
         <View style={s.footer}>
           <Text style={s.footerBrand}>🔥 StreakBoard</Text>
           <Text style={s.footerTagline}>Track what you do. Not what you plan.</Text>
@@ -404,76 +382,69 @@ export default function ProfileScreen({ navigation }) {
   );
 }
 
-const s = StyleSheet.create({
-  safe:    { flex: 1, backgroundColor: COLORS.bg },
-  center:  { flex: 1, backgroundColor: COLORS.bg, alignItems: 'center', justifyContent: 'center' },
+const makeStyles = (colors) => StyleSheet.create({
+  safe:    { flex: 1, backgroundColor: colors.bg },
+  center:  { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
   scroll:  { flex: 1 },
-  content: { paddingHorizontal: 20, paddingBottom: 100, paddingTop: 24 },
+  content: { paddingHorizontal: 20, paddingBottom: 120, paddingTop: 24 },
 
-  // Avatar
   avatarSection: { alignItems: 'center', marginBottom: 20 },
-  avatarCircle:  { width: 90, height: 90, borderRadius: 45, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', marginTop: 20, marginBottom: 12 },
-  avatarText:    { color: COLORS.textPrimary, fontSize: 36, fontWeight: '700' },
+  avatarCircle:  { width: 90, height: 90, borderRadius: 45, alignItems: 'center', justifyContent: 'center', marginTop: 20, marginBottom: 12 },
+  avatarText:    { color: '#ffffff', fontSize: 36, fontWeight: '700' },
   nameRow:       { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
-  profileName:   { color: COLORS.textPrimary, fontSize: 22, fontWeight: '700' },
+  profileName:   { color: colors.textPrimary, fontSize: 22, fontWeight: '700' },
   editIcon:      { padding: 4 },
   editIconTxt:   { fontSize: 16 },
-  profileEmail:  { color: COLORS.textMuted, fontSize: 13, marginTop: 4 },
+  profileEmail:  { color: colors.textMuted, fontSize: 13, marginTop: 4 },
   editRow:       { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4, width: '100%' },
-  nameInput:     { flex: 1, backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: 12, height: 44, paddingHorizontal: 14, color: COLORS.textPrimary, fontSize: 16 },
-  nameInputFocused:{ borderColor: COLORS.primary },
-  saveBtn:       { backgroundColor: COLORS.primary, borderRadius: 10, paddingHorizontal: 14, height: 44, alignItems: 'center', justifyContent: 'center' },
-  saveBtnTxt:    { color: COLORS.textPrimary, fontWeight: '600', fontSize: 13 },
-  cancelBtn:     { backgroundColor: COLORS.card, borderRadius: 10, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: COLORS.border },
-  cancelBtnTxt:  { color: COLORS.textSecondary, fontSize: 16 },
+  nameInput:     { flex: 1, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 12, height: 44, paddingHorizontal: 14, color: colors.textPrimary, fontSize: 16 },
+  nameInputFocused: { borderColor: colors.primary },
+  saveBtn:       { backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 14, height: 44, alignItems: 'center', justifyContent: 'center' },
+  saveBtnTxt:    { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
+  cancelBtn:     { backgroundColor: colors.card, borderRadius: 10, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border },
+  cancelBtnTxt:  { color: colors.textSecondary, fontSize: 16 },
 
-  // Stats
-  statsGrid: { flexDirection: 'row', backgroundColor: COLORS.card, borderRadius: 14, borderWidth: 1, borderColor: COLORS.border, paddingVertical: 16, marginBottom: 12, alignItems: 'center' },
+  statsGrid: { flexDirection: 'row', backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.border, paddingVertical: 16, marginBottom: 12, alignItems: 'center' },
   statCell:  { flex: 1, alignItems: 'center' },
   statIcon:  { fontSize: 20, marginBottom: 4 },
-  statNum:   { color: COLORS.textPrimary, fontSize: 20, fontWeight: '700' },
-  statLbl:   { color: COLORS.textMuted, fontSize: 11, marginTop: 2 },
-  statDiv:   { width: 1, height: 40, backgroundColor: COLORS.border },
+  statNum:   { color: colors.textPrimary, fontSize: 20, fontWeight: '700' },
+  statLbl:   { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  statDiv:   { width: 1, height: 40, backgroundColor: colors.border },
 
-  // Sections
-  section:      { backgroundColor: COLORS.card, borderRadius: 14, borderWidth: 1, borderColor: COLORS.border, marginBottom: 12, overflow: 'hidden' },
-  sectionTitle: { color: COLORS.textMuted, fontSize: 11, fontWeight: '600', letterSpacing: 1, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 8 },
-  divider:      { height: 1, backgroundColor: COLORS.border, marginHorizontal: 16 },
+  section:      { backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.border, marginBottom: 12, overflow: 'hidden' },
+  sectionTitle: { color: colors.textMuted, fontSize: 11, fontWeight: '600', letterSpacing: 1, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 8 },
+  divider:      { height: 1, backgroundColor: colors.border, marginHorizontal: 16 },
 
   settingRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 13 },
   settingLeft: { flex: 1, marginRight: 12 },
-  settingLabel:{ color: COLORS.textPrimary, fontSize: 14, fontWeight: '500' },
-  settingDesc: { color: COLORS.textMuted, fontSize: 12, marginTop: 2 },
-  timeInput:    { backgroundColor: COLORS.bg, borderWidth: 1, borderColor: COLORS.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, color: COLORS.textPrimary, minWidth: 64, textAlign: 'center' },
-  saveTimeBtn:  { backgroundColor: COLORS.primary, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, marginLeft: 8 },
-  saveTimeBtnTxt: { color: COLORS.textPrimary, fontSize: 13, fontWeight: '600' },
+  settingLabel:{ color: colors.textPrimary, fontSize: 14, fontWeight: '500' },
+  settingDesc: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
+  timeInput:   { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, color: colors.textPrimary, minWidth: 64, textAlign: 'center' },
+  saveTimeBtn: { backgroundColor: colors.primary, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, marginLeft: 8 },
+  saveTimeBtnTxt: { color: colors.textPrimary, fontSize: 13, fontWeight: '600' },
 
   infoRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 13 },
-  infoLabel:{ color: COLORS.textSecondary, fontSize: 13 },
-  infoVal:  { color: COLORS.textPrimary, fontSize: 13, fontWeight: '500', maxWidth: '55%', textAlign: 'right' },
-  badge:    { backgroundColor: COLORS.primary + '22', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
-  badgeTxt: { color: COLORS.primary, fontSize: 11, fontWeight: '600' },
+  infoLabel:{ color: colors.textSecondary, fontSize: 13 },
+  infoVal:  { color: colors.textPrimary, fontSize: 13, fontWeight: '500', maxWidth: '55%', textAlign: 'right' },
+  badge:    { backgroundColor: 'rgba(124,58,237,0.12)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
+  badgeTxt: { color: colors.primary, fontSize: 11, fontWeight: '600' },
 
-  // Share
-  urlRow:      { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.bg, borderRadius: 10, marginHorizontal: 16, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10 },
-  urlText:     { flex: 1, color: COLORS.textSecondary, fontSize: 12 },
-  copyBtn:     { backgroundColor: COLORS.primary, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, marginLeft: 8 },
-  copyBtnText: { color: COLORS.textPrimary, fontSize: 12, fontWeight: '600' },
-  shareLinkBtn:{ borderWidth: 1, borderColor: COLORS.primary, borderRadius: 12, marginHorizontal: 16, marginBottom: 14, paddingVertical: 12, alignItems: 'center' },
-  shareLinkTxt:{ color: COLORS.primary, fontSize: 13, fontWeight: '600' },
+  urlRow:      { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.bg, borderRadius: 10, marginHorizontal: 16, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10 },
+  urlText:     { flex: 1, color: colors.textSecondary, fontSize: 12 },
+  copyBtn:     { backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, marginLeft: 8 },
+  copyBtnText: { color: colors.textPrimary, fontSize: 12, fontWeight: '600' },
+  shareLinkBtn:{ borderWidth: 1, borderColor: colors.primary, borderRadius: 12, marginHorizontal: 16, marginBottom: 14, paddingVertical: 12, alignItems: 'center' },
+  shareLinkTxt:{ color: colors.primary, fontSize: 13, fontWeight: '600' },
 
-  // Nav rows (Friends / Journal links)
   navRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 },
-  navRowText: { color: COLORS.textPrimary, fontSize: 14, fontWeight: '500' },
-  navRowArrow:{ color: COLORS.textMuted, fontSize: 20 },
+  navRowText: { color: colors.textPrimary, fontSize: 14, fontWeight: '500' },
+  navRowArrow:{ color: colors.textMuted, fontSize: 20 },
 
-  // Logout
-  logoutBtn:    { height: 54, borderRadius: 14, borderWidth: 1.5, borderColor: COLORS.danger, alignItems: 'center', justifyContent: 'center', marginTop: 16, marginBottom: 8 },
-  logoutBtnTxt: { color: COLORS.danger, fontSize: 16, fontWeight: '600' },
+  logoutBtn:    { height: 54, borderRadius: 14, borderWidth: 1.5, borderColor: colors.danger, alignItems: 'center', justifyContent: 'center', marginTop: 16, marginBottom: 8 },
+  logoutBtnTxt: { color: colors.danger, fontSize: 16, fontWeight: '600' },
 
-  // Footer
   footer:        { alignItems: 'center', marginTop: 20 },
-  footerBrand:   { color: COLORS.textMuted, fontSize: 13 },
-  footerTagline: { color: '#2a2a3a', fontSize: 11, marginTop: 4 },
-  footerVersion: { color: '#2a2a3a', fontSize: 10, marginTop: 2 },
+  footerBrand:   { color: colors.textMuted, fontSize: 13 },
+  footerTagline: { color: colors.borderHover, fontSize: 11, marginTop: 4 },
+  footerVersion: { color: colors.borderHover, fontSize: 10, marginTop: 2 },
 });
