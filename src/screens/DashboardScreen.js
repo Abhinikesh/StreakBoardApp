@@ -12,11 +12,14 @@ import {
   ActivityIndicator,
   StatusBar,
   Animated,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import api from '../lib/axios';
-import { playDoneSound, playMissedSound } from '../lib/sound';
+import { playTickSound, playCrossSound } from '../lib/sound';
 import { useTheme } from '../context/ThemeContext';
 
 
@@ -140,6 +143,11 @@ export default function DashboardScreen({ navigation }) {
   const [noteText,           setNoteText]           = useState('');
   const [noteSaving,         setNoteSaving]         = useState(false);
   const [noteFocused,        setNoteFocused]        = useState(false);
+  const [customDays,         setCustomDays]         = useState('');
+  const [showCustomInput,    setShowCustomInput]    = useState(false);
+  const [soundEnabled,       setSoundEnabled]       = useState(true);
+  const [userAvatar,         setUserAvatar]         = useState(null);
+  const [showNoteSuccess,    setShowNoteSuccess]    = useState(false);
   const progressAnim = useRef(new Animated.Value(0)).current;
 
   // ── Fetch all data ──────────────────────────────────────────────────────────
@@ -183,6 +191,22 @@ export default function DashboardScreen({ navigation }) {
       setLoading(false);
     })();
   }, [fetchAll]);
+
+  // Load sound preference
+  useEffect(() => {
+    AsyncStorage.getItem('soundEnabled').then((val) => {
+      setSoundEnabled(val !== 'false'); // default true
+    }).catch(() => {});
+  }, []);
+
+  // Reload avatar from SecureStore every time this screen is focused
+  useFocusEffect(useCallback(() => {
+    SecureStore.getItemAsync('user_cache').then((raw) => {
+      if (raw) {
+        try { setUserAvatar(JSON.parse(raw).avatar || null); } catch (_) {}
+      }
+    }).catch(() => {});
+  }, []));
 
   // Animate progress bar when habits/logs change
   useEffect(() => {
@@ -245,13 +269,13 @@ export default function DashboardScreen({ navigation }) {
         }
         await refreshHabitLogs(habit._id);
         // Play sound after successful log
-        if (status === 'done')   playDoneSound().catch(() => {});
-        if (status === 'missed') playMissedSound().catch(() => {});
+        if (status === 'done')   playTickSound(soundEnabled).catch(() => {});
+        if (status === 'missed') playCrossSound(soundEnabled).catch(() => {});
       } catch (err) {
         Alert.alert('Error', 'Failed to update log. Please try again.');
       }
     },
-    [habitLogs, refreshHabitLogs],
+    [habitLogs, refreshHabitLogs, soundEnabled],
   );
 
   // ── Create habit ────────────────────────────────────────────────────────────
@@ -260,24 +284,31 @@ export default function DashboardScreen({ navigation }) {
       Alert.alert('Required', 'Please enter a habit name.');
       return;
     }
+    const finalDays = showCustomInput ? (parseInt(customDays) || 0) : newHabit.trackingPeriod;
+    if (!finalDays || isNaN(finalDays) || finalDays < 1 || finalDays > 365) {
+      Alert.alert('Invalid', 'Please enter valid days (1–365)');
+      return;
+    }
     setCreating(true);
     try {
       await api.post('/api/habits', {
         name:           newHabit.name.trim(),
         icon:           newHabit.icon,
         colorHex:       newHabit.colorHex,
-        trackingPeriod: newHabit.trackingPeriod,
+        trackingPeriod: finalDays,
       });
       setShowAddModal(false);
       setSelectedSuggestion(null);
       setNewHabit({ name: '', icon: '💧', colorHex: '#10b981', trackingPeriod: 30 });
+      setCustomDays('');
+      setShowCustomInput(false);
       await fetchAll();
     } catch (err) {
       Alert.alert('Error', err.response?.data?.message || 'Failed to create habit.');
     } finally {
       setCreating(false);
     }
-  }, [newHabit, fetchAll]);
+  }, [newHabit, fetchAll, showCustomInput, customDays]);
 
   // ── Save note ──────────────────────────────────────────────────────────────
   const handleSaveNote = useCallback(async () => {
@@ -304,6 +335,8 @@ export default function DashboardScreen({ navigation }) {
         setShowNoteModal(false);
         setNoteText('');
         setNoteModalHabit(null);
+        setShowNoteSuccess(true);
+        setTimeout(() => setShowNoteSuccess(false), 2000);
       } catch (__) {
         Alert.alert('Error', 'Could not save note.');
       }
@@ -395,9 +428,21 @@ export default function DashboardScreen({ navigation }) {
               {getGreeting()}, {firstName} 🔥
             </Text>
           </View>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initial}</Text>
-          </View>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Profile')}
+            activeOpacity={0.85}
+          >
+            {userAvatar ? (
+              <Image
+                source={{ uri: userAvatar }}
+                style={styles.avatar}
+              />
+            ) : (
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>{initial}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
         </View>
 
         {/* ── Section 2: Stats bar ── */}
@@ -633,7 +678,7 @@ export default function DashboardScreen({ navigation }) {
         visible={showAddModal}
         animationType="slide"
         transparent
-        onRequestClose={() => { setShowAddModal(false); setSelectedSuggestion(null); }}
+        onRequestClose={() => { setShowAddModal(false); setSelectedSuggestion(null); setCustomDays(''); setShowCustomInput(false); }}
       >
         <View style={styles.modalBackdrop}>
           <View style={styles.modalSheet}>
@@ -641,7 +686,7 @@ export default function DashboardScreen({ navigation }) {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>New Habit</Text>
               <TouchableOpacity
-                onPress={() => { setShowAddModal(false); setSelectedSuggestion(null); }}
+                onPress={() => { setShowAddModal(false); setSelectedSuggestion(null); setCustomDays(''); setShowCustomInput(false); }}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
                 <Text style={styles.modalClose}>✕</Text>
@@ -680,6 +725,7 @@ export default function DashboardScreen({ navigation }) {
                 value={newHabit.name}
                 onChangeText={(v) => setNewHabit((p) => ({ ...p, name: v }))}
                 fontSize={16}
+                maxLength={60}
               />
 
               {/* 2. Emoji picker */}
@@ -719,31 +765,62 @@ export default function DashboardScreen({ navigation }) {
 
               {/* 4. Tracking period */}
               <Text style={styles.fieldLabel}>Track for</Text>
-              <View style={styles.periodRow}>
-                {PERIOD_OPTIONS.map((days) => (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                {[30, 60, 90].map((days) => (
                   <TouchableOpacity
                     key={days}
-                    style={[
-                      styles.periodPill,
-                      newHabit.trackingPeriod === days && styles.periodPillSelected,
-                    ]}
-                    activeOpacity={0.75}
-                    onPress={() =>
-                      setNewHabit((p) => ({ ...p, trackingPeriod: days }))
-                    }
+                    onPress={() => { setNewHabit((p) => ({ ...p, trackingPeriod: days })); setShowCustomInput(false); setCustomDays(''); }}
+                    style={{
+                      paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20,
+                      backgroundColor: newHabit.trackingPeriod === days && !showCustomInput
+                        ? '#7C3AED' : 'transparent',
+                      borderWidth: 1.5,
+                      borderColor: newHabit.trackingPeriod === days && !showCustomInput
+                        ? '#7C3AED' : '#D1D5DB',
+                    }}
                   >
-                    <Text
-                      style={[
-                        styles.periodPillText,
-                        newHabit.trackingPeriod === days &&
-                          styles.periodPillTextSelected,
-                      ]}
-                    >
-                      {days} days
-                    </Text>
+                    <Text style={{
+                      color: newHabit.trackingPeriod === days && !showCustomInput ? 'white' : '#6B7280',
+                      fontWeight: '600',
+                    }}>{days} days</Text>
                   </TouchableOpacity>
                 ))}
+                <TouchableOpacity
+                  onPress={() => { setShowCustomInput(true); setNewHabit((p) => ({ ...p, trackingPeriod: 0 })); }}
+                  style={{
+                    paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20,
+                    backgroundColor: showCustomInput ? '#7C3AED' : 'transparent',
+                    borderWidth: 1.5,
+                    borderColor: showCustomInput ? '#7C3AED' : '#D1D5DB',
+                  }}
+                >
+                  <Text style={{ color: showCustomInput ? 'white' : '#6B7280', fontWeight: '600' }}>Custom</Text>
+                </TouchableOpacity>
               </View>
+
+              {showCustomInput && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                  <TextInput
+                    keyboardType="number-pad"
+                    placeholder="Enter days (e.g. 45)"
+                    placeholderTextColor="#9CA3AF"
+                    value={customDays}
+                    onChangeText={(val) => {
+                      setCustomDays(val);
+                      const num = parseInt(val);
+                      if (num > 0 && num <= 365) setNewHabit((p) => ({ ...p, trackingPeriod: num }));
+                    }}
+                    style={{
+                      flex: 1, borderWidth: 1.5, borderColor: '#7C3AED',
+                      borderRadius: 12, padding: 12, fontSize: 15,
+                      color: colors.textPrimary,
+                      backgroundColor: colors.bg,
+                    }}
+                    maxLength={3}
+                  />
+                  <Text style={{ color: '#6B7280', fontSize: 13 }}>days (max 365)</Text>
+                </View>
+              )}
 
               {/* 5. Create button */}
               <TouchableOpacity
@@ -790,6 +867,7 @@ export default function DashboardScreen({ navigation }) {
               multiline
               textAlignVertical="top"
               fontSize={15}
+              maxLength={500}
               onFocus={() => setNoteFocused(true)}
               onBlur={() => setNoteFocused(false)}
             />
@@ -806,6 +884,19 @@ export default function DashboardScreen({ navigation }) {
           </View>
         </View>
       </Modal>
+
+      {/* ── Note saved toast ── */}
+      {showNoteSuccess && (
+        <View style={{
+          position: 'absolute', bottom: 110, alignSelf: 'center',
+          backgroundColor: '#22C55E', paddingHorizontal: 24,
+          paddingVertical: 12, borderRadius: 24, zIndex: 999,
+          elevation: 10,
+          shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 6,
+        }}>
+          <Text style={{ color: 'white', fontWeight: '700', fontSize: 14 }}>✓ Note saved</Text>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -829,7 +920,7 @@ const makeStyles = (colors) => StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 20,
-    paddingBottom: 100,
+    paddingBottom: 120,
     paddingTop: 16,
   },
 
@@ -1025,7 +1116,7 @@ const makeStyles = (colors) => StyleSheet.create({
   // ── FAB ──
   fab: {
     position: 'absolute',
-    bottom: 90,
+    bottom: 100,
     right: 20,
     width: 56,
     height: 56,

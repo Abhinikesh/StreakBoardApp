@@ -18,7 +18,9 @@ import {
   getReminderSettings,
 } from '../lib/notifications';
 
-const BASE_URL = 'https://streak-o.vercel.app';
+import { WEB_BASE } from '../config/api';
+
+const BASE_URL = WEB_BASE;
 
 function getAvatarColor(name) {
   const palette = ['#7c3aed','#10b981','#ef4444','#f59e0b','#3b82f6','#ec4899','#14b8a6','#f97316'];
@@ -55,6 +57,7 @@ export default function ProfileScreen({ navigation }) {
   const [savingReminder,   setSavingReminder]   = useState(false);
   const [avatarUri,        setAvatarUri]        = useState(null);
   const [uploadingAvatar,  setUploadingAvatar]  = useState(false);
+  const [habits,           setHabits]           = useState([]);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -75,6 +78,7 @@ export default function ProfileScreen({ navigation }) {
       setReminderTime(remSettings.time);
 
       const active = (habitsRes.data || []).filter((h) => h.isActive !== false);
+      setHabits(active);
       const logResults = await Promise.all(
         active.map((h) => api.get(`/api/logs/${h._id}`).then((r) => r.data || []).catch(() => [])),
       );
@@ -125,12 +129,35 @@ export default function ProfileScreen({ navigation }) {
   }, [reminderTime]);
 
   const handleReminderTimeSave = useCallback(async () => {
-    if (!notifEnabled) return;
+    // Validate HH:MM format
+    const timeRegex = /^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$/;
+    if (!timeRegex.test(reminderTime.trim())) {
+      Alert.alert('Invalid Time', 'Please enter time in HH:MM format (e.g. 21:00)');
+      return;
+    }
     setSavingReminder(true);
-    const success = await scheduleHabitReminder(reminderTime);
-    setSavingReminder(false);
-    if (success) Alert.alert('✅ Updated', `Reminder updated to ${reminderTime}`);
-  }, [notifEnabled, reminderTime]);
+    try {
+      // Ensure we have permission before scheduling
+      const granted = await requestNotificationPermission();
+      if (!granted) {
+        Alert.alert('Permission needed',
+          'Please allow notifications in Settings to receive reminders.');
+        setSavingReminder(false);
+        return;
+      }
+      const success = await scheduleHabitReminder(reminderTime.trim());
+      if (success) {
+        setNotifEnabled(true);
+        Alert.alert('✅ Reminder saved', `You'll get a daily nudge at ${reminderTime}`);
+      } else {
+        Alert.alert('Error', 'Could not schedule reminder. Try again.');
+      }
+    } catch (e) {
+      Alert.alert('Error', 'Could not save reminder. Try again.');
+    } finally {
+      setSavingReminder(false);
+    }
+  }, [reminderTime]);
 
   const handleToggleSound = useCallback(async (val) => {
     setSoundEnabled(val);
@@ -169,6 +196,29 @@ export default function ProfileScreen({ navigation }) {
     ]);
   }, [navigation]);
 
+  // ── Delete habit ──────────────────────────────────────────────────────────
+  const confirmDeleteHabit = useCallback((habitId, habitName) => {
+    Alert.alert(
+      'Delete Habit',
+      `Delete "${habitName}"?\nThis will permanently remove all its data and streak.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete', style: 'destructive',
+          onPress: async () => {
+            try {
+              await api.delete(`/api/habits/${habitId}`);
+              setHabits((prev) => prev.filter((h) => h._id !== habitId));
+              Alert.alert('Deleted ✓', `"${habitName}" has been removed.`);
+            } catch (e) {
+              Alert.alert('Error', e.response?.data?.message || 'Could not delete habit. Try again.');
+            }
+          },
+        },
+      ],
+    );
+  }, []);
+
   // ── Avatar picker & upload ────────────────────────────────────────────────
   const handlePickAvatar = useCallback(async () => {
     try {
@@ -192,35 +242,60 @@ export default function ProfileScreen({ navigation }) {
     }
   }, []);
 
-  const uploadAvatar = async (uri) => {
+  const uploadAvatar = async (localUri) => {
     setUploadingAvatar(true);
     try {
+      // Detect file extension + MIME type from the URI
+      const filename = localUri.split('/').pop();
+      const match = /\.(\w+)$/.exec(filename);
+      const type = match ? `image/${match[1].toLowerCase().replace('jpg', 'jpeg')}` : 'image/jpeg';
+
       const formData = new FormData();
-      formData.append('file', { uri, type: 'image/jpeg', name: 'avatar.jpg' });
-      formData.append('upload_preset', 'streakboard_avatars');
+      formData.append('file', { uri: localUri, name: filename || 'avatar.jpg', type });
+      formData.append('upload_preset', process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET);
       formData.append('folder', 'avatars');
 
-      // ⚠️ Replace YOUR_CLOUD_NAME with your actual Cloudinary cloud name
-      const cloudName = 'YOUR_CLOUD_NAME';
+      const cloudName = process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME;
+      // NOTE: Do NOT manually set Content-Type — fetch sets it with the correct multipart boundary
       const response = await fetch(
         `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
-        { method: 'POST', body: formData, headers: { 'Content-Type': 'multipart/form-data' } },
+        { method: 'POST', body: formData },
       );
-      const data = await response.json();
-      if (data.secure_url) {
-        await api.put('/api/auth/me', { avatar: data.secure_url });
-        setAvatarUri(data.secure_url);
-        Alert.alert('✅ Updated!', 'Profile photo saved');
-      } else {
-        throw new Error('Upload failed');
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+      if (__DEV__) console.log('Cloudinary error:', errData);
+        throw new Error(errData?.error?.message || `Upload failed (${response.status})`);
       }
+
+      const data = await response.json();
+      const imageUrl = data.secure_url;
+      if (!imageUrl) throw new Error('No secure_url in Cloudinary response');
+
+      // Save avatar URL to backend
+      await api.put('/api/auth/me', { avatar: imageUrl });
+
+      // Update local component state
+      setAvatarUri(imageUrl);
+      setProfile((p) => ({ ...p, avatar: imageUrl }));
+
+      // Persist into SecureStore user cache so Dashboard & other screens pick it up
+      try {
+        const userStr = await SecureStore.getItemAsync('user_cache');
+        const user = userStr ? JSON.parse(userStr) : {};
+        user.avatar = imageUrl;
+        await SecureStore.setItemAsync('user_cache', JSON.stringify(user));
+      } catch (_) {}
+
+      Alert.alert('✅ Updated!', 'Profile photo saved successfully.');
     } catch (e) {
-      Alert.alert('Upload failed', 'Could not save photo. Check Cloudinary setup.');
-      console.error('avatar upload error:', e);
+      if (__DEV__) console.error('avatar upload error:', e);
+      Alert.alert('Upload failed', e.message || 'Check your internet connection and try again.');
     } finally {
       setUploadingAvatar(false);
     }
   };
+
 
   const avatarBg   = getAvatarColor(profile.name);
   const initial    = profile.name ? profile.name[0].toUpperCase() : '?';
@@ -327,6 +402,56 @@ export default function ProfileScreen({ navigation }) {
           </View>
         </View>
 
+        {/* MY HABITS */}
+        <View style={s.section}>
+          <Text style={s.sectionTitle}>MY HABITS</Text>
+          {habits.length === 0 && (
+            <Text style={[s.infoLabel, { paddingHorizontal: 16, paddingBottom: 12 }]}>
+              No active habits yet.
+            </Text>
+          )}
+          {habits.map((habit, i) => (
+            <View
+              key={habit._id}
+              style={{
+                flexDirection: 'row', alignItems: 'center',
+                paddingHorizontal: 16, paddingVertical: 12,
+                borderBottomWidth: i < habits.length - 1 ? 1 : 0,
+                borderBottomColor: colors.border,
+              }}
+            >
+              <Text style={{ fontSize: 20, marginRight: 10 }}>{habit.icon || '📌'}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: colors.textPrimary, fontSize: 14, fontWeight: '600' }}>
+                  {habit.name}
+                </Text>
+                <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>
+                  {habit.trackingPeriod || 30}-day goal
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => confirmDeleteHabit(habit._id, habit.name)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                style={{ padding: 8 }}
+                activeOpacity={0.7}
+              >
+                <Text style={{ fontSize: 18 }}>🗑️</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Home')}
+            style={{
+              borderWidth: 1.5, borderColor: colors.border, borderStyle: 'dashed',
+              borderRadius: 10, padding: 14, alignItems: 'center',
+              margin: 16, marginTop: habits.length ? 8 : 4,
+            }}
+            activeOpacity={0.75}
+          >
+            <Text style={{ color: colors.textMuted, fontSize: 14 }}>+ Add New Habit</Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Preferences */}
         <View style={s.section}>
           <Text style={s.sectionTitle}>PREFERENCES</Text>
@@ -375,28 +500,30 @@ export default function ProfileScreen({ navigation }) {
           {notifEnabled && (
             <>
               <View style={s.divider} />
-              <View style={s.settingRow}>
-                <Text style={[s.settingLabel, { color: colors.textSecondary, flex: 1 }]}>Remind me at:</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <TextInput
-                    style={s.timeInput}
-                    value={reminderTime}
-                    onChangeText={setReminderTime}
-                    keyboardType="numbers-and-punctuation"
-                    maxLength={5}
-                    fontSize={14}
-                    placeholder="20:00"
-                    placeholderTextColor={colors.textMuted}
-                  />
-                  <TouchableOpacity
-                    style={[s.saveTimeBtn, savingReminder && { opacity: 0.6 }]}
-                    onPress={handleReminderTimeSave}
-                    disabled={savingReminder}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={s.saveTimeBtnTxt}>{savingReminder ? '...' : 'Save'}</Text>
-                  </TouchableOpacity>
-                </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, gap: 10 }}>
+                <Text style={[s.settingLabel, { color: colors.textSecondary, flex: 1 }]}>
+                  Remind me at:
+                </Text>
+                <TextInput
+                  style={s.timeInput}
+                  value={reminderTime}
+                  onChangeText={setReminderTime}
+                  keyboardType="numbers-and-punctuation"
+                  maxLength={5}
+                  fontSize={14}
+                  placeholder="21:00"
+                  placeholderTextColor={colors.textMuted}
+                  returnKeyType="done"
+                  onSubmitEditing={handleReminderTimeSave}
+                />
+                <TouchableOpacity
+                  style={[s.saveTimeBtn, savingReminder && { opacity: 0.6 }]}
+                  onPress={handleReminderTimeSave}
+                  disabled={savingReminder}
+                  activeOpacity={0.85}
+                >
+                  <Text style={s.saveTimeBtnTxt}>{savingReminder ? 'Saving…' : 'Save'}</Text>
+                </TouchableOpacity>
               </View>
             </>
           )}

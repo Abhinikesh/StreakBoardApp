@@ -294,6 +294,7 @@ export default function JournalScreen({ navigation }) {
               onFocus={() => setInputFocused(true)}
               onBlur={() => setInputFocused(false)}
               fontSize={15}
+              maxLength={500}
             />
 
             {/* Save button */}
@@ -328,8 +329,8 @@ const makeStyles = (colors) => StyleSheet.create({
   scroll:  { flex: 1 },
   content: { paddingHorizontal: 20, paddingBottom: 100, paddingTop: 16 },
 
-  title:    { color: COLORS.textPrimary, fontSize: 24, fontWeight: '700' },
-  subtitle: { color: COLORS.textMuted, fontSize: 13, marginTop: 4, marginBottom: 16 },
+  title:    { color: colors.textPrimary, fontSize: 24, fontWeight: '700' },
+  subtitle: { color: colors.textMuted, fontSize: 13, marginTop: 4, marginBottom: 16 },
 
   // Filter pills
   pillsScroll:  { marginBottom: 16 },

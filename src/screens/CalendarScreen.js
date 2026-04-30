@@ -217,16 +217,24 @@ export default function CalendarScreen({ navigation, route }) {
     }
   }, [selectedHabit]);
 
-  const year      = currentMonth.getFullYear();
-  const monthIdx  = currentMonth.getMonth();
-  const cells     = buildCalendarDays(year, monthIdx, logs);
-  const rows      = chunkArray(cells, 7);
-  const doneLogs  = logs.filter((l) => l.status === 'done');
-  const totalLogged = logs.length;
-  const completionRate = totalLogged > 0 ? Math.round((doneLogs.length / totalLogged) * 100) : 0;
-  const curStreak  = computeStreak(logs);
-  const bestStreak = computeBestStreak(logs);
-  const monthTitle = currentMonth.toLocaleString('default', { month: 'long', year: 'numeric' });
+  const year       = currentMonth.getFullYear();
+  const monthIdx   = currentMonth.getMonth();
+  const cells      = buildCalendarDays(year, monthIdx, logs);
+  const rows       = chunkArray(cells, 7);
+
+  // ── Stats calculations ───────────────────────────────────────────────────
+  const habitDuration  = selectedHabit?.trackingPeriod || 30;
+  const startDate      = selectedHabit?.createdAt ? new Date(selectedHabit.createdAt) : new Date();
+  const todayDate      = new Date();
+  const daysPassed     = Math.max(1, Math.floor((todayDate - startDate) / (1000 * 60 * 60 * 24)) + 1);
+  const daysRemaining  = Math.max(0, habitDuration - daysPassed);
+  const doneDays       = logs.filter((l) => l.status === 'done').length;
+  const missedDays     = logs.filter((l) => l.status === 'missed').length;
+  const doneLogs       = logs.filter((l) => l.status === 'done');
+  const completionRate = daysPassed > 0 ? Math.round((doneDays / daysPassed) * 100) : 0;
+  const curStreak      = computeStreak(logs);
+  const bestStreak     = computeBestStreak(logs);
+  const monthTitle     = currentMonth.toLocaleString('default', { month: 'long', year: 'numeric' });
 
   // Render calendar cell
   const renderCell = (cell) => {
@@ -313,11 +321,21 @@ export default function CalendarScreen({ navigation, route }) {
                 <Text style={s.shareHabitIcon}>{selectedHabit?.icon}</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={s.shareHabitName}>{selectedHabit?.name}</Text>
-                  <Text style={s.shareHabitSub}>30-day streak tracker</Text>
+                  <Text style={s.shareHabitSub}>{`${selectedHabit?.trackingPeriod || 30}-day streak tracker`}</Text>
                 </View>
                 <View style={s.streakBadge}>
                   <Text style={s.streakBadgeText}>🔥 {curStreak} day streak</Text>
                 </View>
+                {daysRemaining > 0 && (
+                  <View style={{
+                    backgroundColor: '#EFF6FF', borderRadius: 12,
+                    paddingHorizontal: 10, paddingVertical: 4, marginLeft: 6,
+                  }}>
+                    <Text style={{ color: '#3B82F6', fontSize: 12, fontWeight: '600' }}>
+                      {daysRemaining}d left
+                    </Text>
+                  </View>
+                )}
               </View>
 
               {/* Month navigator row with Share button */}
@@ -357,24 +375,37 @@ export default function CalendarScreen({ navigation, route }) {
                 </View>
               )}
 
-              {/* Stats row */}
-              <View style={s.statsBox}>
-                <View style={[s.statCell, s.bRight, s.bBottom]}>
-                  <Text style={s.statNum}>{curStreak}</Text>
-                  <Text style={s.statLbl}>🔥 Current</Text>
-                </View>
-                <View style={[s.statCell, s.bBottom]}>
-                  <Text style={s.statNum}>{bestStreak}</Text>
-                  <Text style={s.statLbl}>⭐ Best</Text>
-                </View>
-                <View style={[s.statCell, s.bRight]}>
-                  <Text style={s.statNum}>{completionRate}%</Text>
-                  <Text style={s.statLbl}>✅ Rate</Text>
-                </View>
-                <View style={s.statCell}>
-                  <Text style={s.statNum}>{doneLogs.length}</Text>
-                  <Text style={s.statLbl}>📅 Done</Text>
-                </View>
+              {/* 4-column stats row: DONE / MISSED / REMAIN / RATE */}
+              <View style={{
+                flexDirection: 'row', backgroundColor: colors.card,
+                borderRadius: 12, marginTop: 12,
+                borderWidth: 1, borderColor: colors.border, overflow: 'hidden',
+              }}>
+                {[
+                  { value: doneDays,           label: 'DONE',   color: '#22C55E' },
+                  { value: missedDays,          label: 'MISSED', color: '#EF4444' },
+                  { value: daysRemaining,       label: 'REMAIN', color: colors.textPrimary },
+                  { value: `${completionRate}%`, label: 'RATE',   color: '#7C3AED' },
+                ].map((item, index) => (
+                  <View
+                    key={item.label}
+                    style={{
+                      flex: 1, alignItems: 'center', paddingVertical: 14,
+                      borderRightWidth: index < 3 ? 1 : 0,
+                      borderRightColor: colors.border,
+                    }}
+                  >
+                    <Text style={{ fontSize: 20, fontWeight: '800', color: item.color }}>
+                      {item.value}
+                    </Text>
+                    <Text style={{
+                      fontSize: 10, color: colors.textMuted, marginTop: 3,
+                      fontWeight: '600', letterSpacing: 0.5,
+                    }}>
+                      {item.label}
+                    </Text>
+                  </View>
+                ))}
               </View>
 
               {/* StreakBoard watermark */}

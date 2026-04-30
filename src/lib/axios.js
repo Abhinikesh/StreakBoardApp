@@ -1,5 +1,6 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
+import { API_BASE } from '../config/api';
 
 // Module-level token cache — updated via setAuthToken()
 let currentToken = null;
@@ -13,7 +14,7 @@ let currentToken = null;
 })();
 
 const api = axios.create({
-  baseURL: 'https://streakboard.onrender.com',
+  baseURL: API_BASE,
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',

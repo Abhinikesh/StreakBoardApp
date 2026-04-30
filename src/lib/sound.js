@@ -1,68 +1,76 @@
 import { Audio } from 'expo-av';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Reads the Sound Effects toggle from ProfileScreen's AsyncStorage key
-async function isSoundEnabled() {
+let tickSound = null;
+let crossSound = null;
+
+/**
+ * Preload both sounds once at app startup.
+ * Call this from App.js useEffect.
+ */
+export async function preloadSounds() {
   try {
-    const val = await AsyncStorage.getItem('soundEnabled');
-    return val !== 'false'; // default: on
-  } catch (_) {
-    return true;
+    await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, staysActiveInBackground: false });
+
+    // TICK — short bright pop (✓ Done)
+    const tickResult = await Audio.Sound.createAsync(
+      { uri: 'https://assets.mixkit.co/sfx/preview/mixkit-fast-small-sweep-transition-166.mp3' },
+      { volume: 0.5, shouldPlay: false },
+    );
+    tickSound = tickResult.sound;
+
+    // CROSS — soft low click (✗ Missed)
+    const crossResult = await Audio.Sound.createAsync(
+      { uri: 'https://assets.mixkit.co/sfx/preview/mixkit-clicking-on-a-small-button-2359.mp3' },
+      { volume: 0.4, shouldPlay: false },
+    );
+    crossSound = crossResult.sound;
+  } catch (e) {
+    console.log('Sound preload failed:', e);
   }
 }
 
 /**
- * Gentle high bubble-pop for ✓ DONE
- * Volume 0.28, rate 1.6 → short bright pop
+ * Play the ✓ Done tick sound.
+ * @param {boolean} enabled  Pass your soundEnabled state value.
  */
-export async function playDoneSound() {
-  if (!(await isSoundEnabled())) return;
+export async function playTickSound(enabled = true) {
+  if (!enabled) return;
   try {
-    await Audio.setAudioModeAsync({
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: false,
-    });
-    const { sound } = await Audio.Sound.createAsync(
-      {
-        uri: 'https://assets.mixkit.co/sfx/preview/mixkit-bubble-pop-up-alert-notification-2357.mp3',
-      },
-      {
-        shouldPlay: true,
-        volume: 0.28,
-        rate: 1.6,
-        shouldCorrectPitch: false,
-      },
-    );
-    sound.setOnPlaybackStatusUpdate((status) => {
-      if (status.didJustFinish) sound.unloadAsync();
-    });
+    if (tickSound) {
+      await tickSound.setPositionAsync(0);
+      await tickSound.setVolumeAsync(0.5);
+      await tickSound.playAsync();
+    }
+  } catch (_) {
+    // never block UI for sound failures
+  }
+}
+
+/**
+ * Play the ✗ Missed cross sound.
+ * @param {boolean} enabled  Pass your soundEnabled state value.
+ */
+export async function playCrossSound(enabled = true) {
+  if (!enabled) return;
+  try {
+    if (crossSound) {
+      await crossSound.setPositionAsync(0);
+      await crossSound.setVolumeAsync(0.4);
+      await crossSound.playAsync();
+    }
   } catch (_) {}
 }
 
 /**
- * Soft low click for ✗ MISSED
- * Volume 0.22, rate 0.85 → muted dull thud
+ * Unload sounds to free memory (call on app unmount if needed).
  */
-export async function playMissedSound() {
-  if (!(await isSoundEnabled())) return;
+export async function unloadSounds() {
   try {
-    await Audio.setAudioModeAsync({
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: false,
-    });
-    const { sound } = await Audio.Sound.createAsync(
-      {
-        uri: 'https://assets.mixkit.co/sfx/preview/mixkit-click-error-on-software-interface-2569.mp3',
-      },
-      {
-        shouldPlay: true,
-        volume: 0.22,
-        rate: 0.85,
-        shouldCorrectPitch: false,
-      },
-    );
-    sound.setOnPlaybackStatusUpdate((status) => {
-      if (status.didJustFinish) sound.unloadAsync();
-    });
+    if (tickSound) { await tickSound.unloadAsync(); tickSound = null; }
+    if (crossSound) { await crossSound.unloadAsync(); crossSound = null; }
   } catch (_) {}
 }
+
+// ─── Legacy aliases kept so any other screen importing the old names doesn't break ───
+export const playDoneSound   = () => playTickSound(true);
+export const playMissedSound = () => playCrossSound(true);

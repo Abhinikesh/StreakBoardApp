@@ -4,6 +4,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Notifications from 'expo-notifications';
 import AppNavigator from './src/navigation/AppNavigator';
 import { ThemeProvider } from './src/context/ThemeContext';
+import { preloadSounds, unloadSounds } from './src/lib/sound';
 
 export default function App() {
   useEffect(() => {
@@ -11,6 +12,11 @@ export default function App() {
       console.log('Notification received:', notification);
     });
     return () => sub.remove();
+  }, []);
+
+  useEffect(() => {
+    preloadSounds();
+    return () => { unloadSounds(); };
   }, []);
 
   return (

@@ -223,7 +223,7 @@ export default function LoginScreen({ navigation }) {
         setTimeout(() => { subscription.remove(); setLoading(false); }, 2000);
       }
     } catch (err) {
-      console.error('Google auth error:', err);
+      if (__DEV__) console.error('Google auth error:', err);
       setLoading(false);
       setError('Google login failed. Please try OTP instead.');
     }

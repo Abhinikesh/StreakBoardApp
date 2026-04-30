@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -12,7 +13,8 @@ import StatsScreen       from '../screens/StatsScreen';
 import FriendsScreen     from '../screens/FriendsScreen';
 import LeaderboardScreen from '../screens/LeaderboardScreen';
 import ProfileScreen     from '../screens/ProfileScreen';
-import JournalScreen    from '../screens/JournalScreen';
+import JournalScreen       from '../screens/JournalScreen';
+import PublicProfileScreen from '../screens/PublicProfileScreen';
 import { useTheme, DARK } from '../context/ThemeContext';
 import SplashScreen from '../screens/SplashScreen';
 
@@ -24,30 +26,46 @@ const TABS = [
   { name: 'Calendar', label: 'Calendar',emoji: '📅', component: CalendarScreen },
   { name: 'Stats',    label: 'Stats',   emoji: '📊', component: StatsScreen },
   { name: 'Friends',  label: 'Friends', emoji: '👥', component: FriendsScreen },
-  { name: 'Ranks',    label: 'Ranks',   emoji: '🏆', component: LeaderboardScreen },
+  { name: 'Ranks',    label: 'Leaderboard', emoji: '🏆', component: LeaderboardScreen },
   { name: 'Profile',  label: 'Profile', emoji: '👤', component: ProfileScreen },
 ];
 
 function MainTabs() {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+
+  // On Android with gesture nav, insets.bottom can be 0 but we still need
+  // a minimum clearance above the gesture strip. We always add at least 8px.
+  const bottomInset = Math.max(insets.bottom, Platform.OS === 'android' ? 8 : 0);
+
   return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: colors.card,
-          borderTopColor:  colors.border,
-          borderTopWidth:  1,
-          height:          Platform.OS === 'ios' ? 80 : 62,
-          paddingBottom:   Platform.OS === 'ios' ? 20 : 8,
-          paddingTop:      6,
-          position:        'absolute',
+          backgroundColor:  colors.card,
+          borderTopColor:   colors.border,
+          borderTopWidth:   1,
+          height:           Platform.OS === 'ios' ? 60 + insets.bottom : 58 + bottomInset,
+          paddingBottom:    Platform.OS === 'ios' ? insets.bottom + 4  : bottomInset + 4,
+          paddingTop:       6,
+          position:         'absolute',
           bottom: 0, left: 0, right: 0,
+          elevation:        12,
+          shadowColor:      '#000',
+          shadowOpacity:    0.08,
+          shadowRadius:     8,
+          shadowOffset:     { width: 0, height: -2 },
         },
         tabBarActiveTintColor:   colors.primary,
         tabBarInactiveTintColor: colors.textMuted,
-        tabBarLabelStyle: { fontSize: 10, fontWeight: '600', marginTop: 2 },
-        tabBarIconStyle:  { marginBottom: 0 },
+        tabBarLabelStyle: {
+          fontSize:   10,
+          fontWeight: '600',
+          marginTop:  2,
+          marginBottom: Platform.OS === 'android' ? 2 : 0,
+        },
+        tabBarIconStyle: { marginTop: 2 },
       }}
     >
       {TABS.map(({ name, label, emoji, component }) => (
@@ -73,9 +91,10 @@ function RootStack({ initialRoute }) {
       initialRouteName={initialRoute}
       screenOptions={{ headerShown: false, animationEnabled: false }}
     >
-      <Stack.Screen name="Login"   component={LoginScreen} />
-      <Stack.Screen name="Main"    component={MainTabs} />
-      <Stack.Screen name="Journal" component={JournalScreen} />
+      <Stack.Screen name="Login"         component={LoginScreen} />
+      <Stack.Screen name="Main"           component={MainTabs} />
+      <Stack.Screen name="Journal"        component={JournalScreen} />
+      <Stack.Screen name="PublicProfile"  component={PublicProfileScreen} />
     </Stack.Navigator>
   );
 }
