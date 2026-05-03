@@ -1,8 +1,10 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const ThemeContext = createContext();
+
+const THEME_KEY = 'themeMode'; // 'light' | 'dark' | 'system'
 
 export const DARK = {
   bg:           '#0d0d1a',
@@ -34,37 +36,65 @@ export const LIGHT = {
 
 export function ThemeProvider({ children }) {
   const systemScheme = useColorScheme(); // 'dark' | 'light' | null
-  const [isDark, setIsDark] = useState(true);
+
+  // themeMode: 'light' | 'dark' | 'system'
+  const [themeMode, setThemeModeState] = useState('system');
   const [loaded, setLoaded] = useState(false);
 
+  // Load the saved preference once on mount
   useEffect(() => {
-    AsyncStorage.getItem('theme')
+    AsyncStorage.getItem(THEME_KEY)
       .then((saved) => {
-        if (saved !== null) {
-          // User has a saved preference — honour it
-          setIsDark(saved === 'dark');
+        if (saved === 'light' || saved === 'dark' || saved === 'system') {
+          setThemeModeState(saved);
+        } else if (saved === null) {
+          // Legacy apps had no entry — treat as system default
+          setThemeModeState('system');
         } else {
-          // No saved preference — follow the system theme
-          setIsDark(systemScheme !== 'light');
+          // Migrate old boolean-style 'dark'/'light' values (same strings, so fine)
+          setThemeModeState('system');
         }
         setLoaded(true);
       })
       .catch(() => setLoaded(true));
-  }, [systemScheme]);
+  }, []);
 
-  const toggleTheme = async (value) => {
-    // Accept either a boolean (Switch-style) or no-arg toggle
-    const next = typeof value === 'boolean' ? value : !isDark;
-    setIsDark(next);
+  // Derived isDark value: resolved against the live system scheme when mode = 'system'
+  const isDark =
+    themeMode === 'dark'  ? true  :
+    themeMode === 'light' ? false :
+    systemScheme === 'dark'; // 'system' — follow the OS
+
+  /** Persist + apply a new theme mode */
+  const setThemeMode = useCallback(async (mode) => {
+    // mode must be 'light' | 'dark' | 'system'
+    setThemeModeState(mode);
     try {
-      await AsyncStorage.setItem('theme', next ? 'dark' : 'light');
+      await AsyncStorage.setItem(THEME_KEY, mode);
     } catch (_) {}
-  };
+  }, []);
+
+  /**
+   * Backward-compat: ProfileScreen used to call toggleTheme(booleanValue).
+   * Keep this working so any code that still calls it doesn't break.
+   */
+  const toggleTheme = useCallback(async (value) => {
+    const next = typeof value === 'boolean' ? value : !isDark;
+    await setThemeMode(next ? 'dark' : 'light');
+  }, [isDark, setThemeMode]);
 
   if (!loaded) return null;
 
   return (
-    <ThemeContext.Provider value={{ isDark, toggleTheme, colors: isDark ? DARK : LIGHT }}>
+    <ThemeContext.Provider
+      value={{
+        isDark,
+        themeMode,
+        setThemeMode,
+        toggleTheme,           // kept for backward compat
+        colors: isDark ? DARK : LIGHT,
+      }}
+    >
       {children}
     </ThemeContext.Provider>
   );

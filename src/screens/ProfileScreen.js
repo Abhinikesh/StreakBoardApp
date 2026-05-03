@@ -39,7 +39,7 @@ function computeBestStreak(logs) {
 }
 
 export default function ProfileScreen({ navigation }) {
-  const { colors, isDark, toggleTheme } = useTheme();
+  const { colors, isDark, themeMode, setThemeMode, toggleTheme } = useTheme();
   const s = makeStyles(colors);
 
   const [profile, setProfile] = useState({ name: '', email: '', createdAt: '', avatar: '' });
@@ -456,18 +456,29 @@ export default function ProfileScreen({ navigation }) {
         {/* Preferences */}
         <View style={s.section}>
           <Text style={s.sectionTitle}>PREFERENCES</Text>
+
+          {/* ── Appearance (3-way: Light / System / Dark) ── */}
           <View style={s.settingRow}>
             <View style={s.settingLeft}>
-              <Text style={s.settingLabel}>🌙 Dark Mode</Text>
-              <Text style={s.settingDesc}>App appearance</Text>
+              <Text style={s.settingLabel}>🎨 Appearance</Text>
+              <Text style={s.settingDesc}>Choose your app theme</Text>
             </View>
-            <Switch
-              value={isDark}
-              onValueChange={toggleTheme}
-              trackColor={{ false: colors.border, true: colors.primary }}
-              thumbColor={colors.textPrimary}
-            />
           </View>
+          <View style={s.themeSegment}>
+            {[['light', '☀️ Light'], ['system', '⚙️ System'], ['dark', '🌙 Dark']].map(([mode, label]) => (
+              <TouchableOpacity
+                key={mode}
+                style={[s.themeSegBtn, themeMode === mode && s.themeSegBtnActive]}
+                onPress={() => setThemeMode(mode)}
+                activeOpacity={0.75}
+              >
+                <Text style={[s.themeSegBtnTxt, themeMode === mode && s.themeSegBtnTxtActive]}>
+                  {label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
           <View style={s.divider} />
           <View style={s.settingRow}>
             <View style={s.settingLeft}>
@@ -688,4 +699,35 @@ const makeStyles = (colors) => StyleSheet.create({
   footerBrand: { color: colors.textMuted, fontSize: 13 },
   footerTagline: { color: colors.borderHover, fontSize: 11, marginTop: 4 },
   footerVersion: { color: colors.borderHover, fontSize: 10, marginTop: 2 },
+
+  // ── 3-segment theme picker ────────────────────────────────────────────────
+  themeSegment: {
+    flexDirection: 'row',
+    backgroundColor: colors.bg,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginHorizontal: 16,
+    marginBottom: 14,
+    padding: 3,
+    gap: 3,
+  },
+  themeSegBtn: {
+    flex: 1,
+    paddingVertical: 9,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  themeSegBtnActive: {
+    backgroundColor: colors.primary,
+  },
+  themeSegBtnTxt: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  themeSegBtnTxtActive: {
+    color: '#ffffff',
+  },
 });
