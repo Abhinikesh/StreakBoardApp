@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
   StyleSheet, ActivityIndicator, StatusBar, Image,
-  RefreshControl, Switch, Alert, Share, Linking, FlatList,
+  RefreshControl, Switch, Alert, Share, Linking, FlatList, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -54,6 +54,15 @@ export default function FriendsScreen({ navigation }) {
   const [copyText,     setCopyText]     = useState('Copy');
   const [toggling,     setToggling]     = useState(false);
 
+  // ── Challenge state ──────────────────────────────────────────────────────
+  const [activeTab,       setActiveTab]     = useState('friends'); // 'friends' | 'challenges'
+  const [challenges,      setChallenges]    = useState([]);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [selectedFriend,  setSelectedFriend]  = useState(null);
+  const [habitInput,      setHabitInput]    = useState('');
+  const [myHabits,        setMyHabits]      = useState([]);
+  const [sending,         setSending]       = useState(false);
+
   // ── Fetch share info ────────────────────────────────────────────────────────
   const fetchShareData = useCallback(async () => {
     try {
@@ -70,16 +79,23 @@ export default function FriendsScreen({ navigation }) {
     } catch (_) {}
   }, []);
 
+  const fetchChallenges = useCallback(async () => {
+    try {
+      const res = await api.get('/api/friend-challenges');
+      setChallenges(Array.isArray(res.data) ? res.data : []);
+    } catch (_) {}
+  }, []);
+
   const fetchAll = useCallback(async () => {
-    await Promise.all([fetchShareData(), fetchFriends()]);
-  }, [fetchShareData, fetchFriends]);
+    await Promise.all([fetchShareData(), fetchFriends(), fetchChallenges()]);
+  }, [fetchShareData, fetchFriends, fetchChallenges]);
 
   useEffect(() => {
     (async () => { setLoading(true); await fetchAll(); setLoading(false); })();
   }, [fetchAll]);
 
   // Reload friends every time the tab is focused
-  useFocusEffect(useCallback(() => { fetchFriends(); }, [fetchFriends]));
+  useFocusEffect(useCallback(() => { fetchFriends(); fetchChallenges(); }, [fetchFriends, fetchChallenges]));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true); await fetchAll(); setRefreshing(false);
@@ -182,6 +198,55 @@ export default function FriendsScreen({ navigation }) {
     );
   }, []);
 
+  // ── Challenge actions ───────────────────────────────────────────────────
+  const handleOpenCreate = useCallback(async (friend) => {
+    setSelectedFriend(friend);
+    setHabitInput('');
+    try {
+      const res = await api.get('/api/habits');
+      setMyHabits((res.data || []).filter(h => h.isActive).slice(0, 10));
+    } catch (_) { setMyHabits([]); }
+    setShowCreateModal(true);
+  }, []);
+
+  const handleSendChallenge = useCallback(async () => {
+    if (!habitInput.trim()) { Alert.alert('', 'Enter a habit name.'); return; }
+    setSending(true);
+    try {
+      await api.post('/api/friend-challenges', {
+        friendId: selectedFriend._id,
+        habitName: habitInput.trim(),
+      });
+      setShowCreateModal(false);
+      setActiveTab('challenges');
+      await fetchChallenges();
+      Alert.alert('Challenge Sent!', `${selectedFriend.name} has been challenged.`);
+    } catch (e) {
+      Alert.alert('Error', e.response?.data?.message || 'Could not send challenge.');
+    } finally { setSending(false); }
+  }, [habitInput, selectedFriend, fetchChallenges]);
+
+  const handleAccept = useCallback(async (id) => {
+    try {
+      await api.patch(`/api/friend-challenges/${id}/accept`);
+      await fetchChallenges();
+    } catch (e) {
+      Alert.alert('Error', e.response?.data?.message || 'Could not accept.');
+    }
+  }, [fetchChallenges]);
+
+  const handleDecline = useCallback(async (id) => {
+    Alert.alert('Decline Challenge', 'Decline this challenge?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Decline', style: 'destructive', onPress: async () => {
+        try {
+          await api.patch(`/api/friend-challenges/${id}/decline`);
+          await fetchChallenges();
+        } catch (_) {}
+      }},
+    ]);
+  }, [fetchChallenges]);
+
   const profileUrl = shareData.shareUrl || `${BASE_URL}/u/${shareData.shareCode}`;
 
   if (loading) {
@@ -194,7 +259,14 @@ export default function FriendsScreen({ navigation }) {
 
       <View style={s.navbar}>
         <Text style={s.navBrand}>👥 Friends</Text>
-        <Text style={s.navCount}>{friends.length} friend{friends.length !== 1 ? 's' : ''}</Text>
+        <View style={s.tabSwitch}>
+          <TouchableOpacity style={[s.tabBtn, activeTab==='friends' && s.tabBtnActive]} onPress={() => setActiveTab('friends')}>
+            <Text style={[s.tabBtnTxt, activeTab==='friends' && s.tabBtnTxtActive]}>Friends</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[s.tabBtn, activeTab==='challenges' && s.tabBtnActive]} onPress={() => { setActiveTab('challenges'); fetchChallenges(); }}>
+            <Text style={[s.tabBtnTxt, activeTab==='challenges' && s.tabBtnTxtActive]}>Challenges{challenges.filter(c=>c.status==='pending'&&c.challengedId?._id===undefined).length > 0 ? '' : ''}</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
@@ -335,6 +407,9 @@ export default function FriendsScreen({ navigation }) {
                     {friend.todayDone != null ? `  ·  ✅ ${friend.todayDone} today` : ''}
                   </Text>
                 </View>
+                <TouchableOpacity style={s.challengeBtn} onPress={() => handleOpenCreate(friend)} activeOpacity={0.85}>
+                  <Text style={s.challengeBtnTxt}>⚔️</Text>
+                </TouchableOpacity>
                 <Text style={s.friendArrow}>›</Text>
               </TouchableOpacity>
             ))
@@ -345,6 +420,117 @@ export default function FriendsScreen({ navigation }) {
         </View>
 
       </ScrollView>
+
+      {/* ── Challenges Tab ── */}
+      {activeTab === 'challenges' && (
+        <ScrollView style={[s.scroll, {position:'absolute',top:0,left:0,right:0,bottom:0,backgroundColor:colors.bg}]}
+          contentContainerStyle={[s.content,{paddingTop:80}]}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary}/>}>
+          {challenges.length === 0 ? (
+            <View style={s.emptyFriends}>
+              <Text style={s.emptyEmoji}>⚔️</Text>
+              <Text style={s.emptyTitle}>No challenges yet</Text>
+              <Text style={s.emptySub}>Tap the ⚔️ button next to a friend to challenge them.</Text>
+            </View>
+          ) : challenges.map(c => {
+            const isChallenger = c.challengerId?._id === undefined
+              ? String(c.challengerId) !== undefined : true;
+            const me = c.challengerId;
+            const them = c.challengedId;
+            const myDays = c.challengerDaysLogged?.length ?? 0;
+            const theirDays = c.challengedDaysLogged?.length ?? 0;
+            const days = c.startDate
+              ? Array.from({length:7},(_,i)=>{ const d=new Date(c.startDate+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()+i); return d.toISOString().split('T')[0]; })
+              : [];
+            const statusColor = c.status==='active' ? colors.primary : c.status==='complete' ? '#16a34a' : c.status==='pending' ? '#f59e0b' : '#ef4444';
+            return (
+              <View key={c._id} style={s.challengeCard}>
+                <View style={s.challengeCardTop}>
+                  <View style={[s.statusPill,{backgroundColor:statusColor+'22',borderColor:statusColor+'55'}]}>
+                    <Text style={[s.statusPillTxt,{color:statusColor}]}>{c.status.toUpperCase()}</Text>
+                  </View>
+                  {c.status==='active' && c.endDate && (
+                    <Text style={s.challengeDays}>{Math.max(0,Math.ceil((new Date(c.endDate)-new Date())/86400000))}d left</Text>
+                  )}
+                </View>
+                <Text style={s.challengeHabit}>{c.habitName}</Text>
+                <View style={s.challengePlayers}>
+                  <Text style={s.challengePlayer} numberOfLines={1}>{me?.name ?? 'You'}</Text>
+                  <Text style={s.challengeVs}>vs</Text>
+                  <Text style={s.challengePlayer} numberOfLines={1}>{them?.name ?? '...'}</Text>
+                </View>
+                {c.status !== 'pending' && days.length > 0 && (
+                  <View style={s.gridRow}>
+                    <View style={s.dayGrid}>
+                      {days.map(d => (
+                        <View key={d+'c'} style={[s.dayDot, c.challengerDaysLogged?.includes(d) && s.dayDotDone]}>
+                          <Text style={s.dayDotTxt}>{c.challengerDaysLogged?.includes(d)?'✓':''}</Text>
+                        </View>
+                      ))}
+                    </View>
+                    <View style={s.dayGrid}>
+                      {days.map(d => (
+                        <View key={d+'e'} style={[s.dayDot, c.challengedDaysLogged?.includes(d) && s.dayDotDone]}>
+                          <Text style={s.dayDotTxt}>{c.challengedDaysLogged?.includes(d)?'✓':''}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
+                {c.status==='complete' && (
+                  <Text style={s.resultTxt}>
+                    {myDays === theirDays ? '🤝 Tied!' : myDays > theirDays ? '🏆 You won! +50 XP' : `🥈 ${them?.name} won`}
+                  </Text>
+                )}
+                {c.status==='pending' && (
+                  <View style={s.pendingActions}>
+                    <TouchableOpacity style={s.acceptBtn} onPress={() => handleAccept(c._id)}>
+                      <Text style={s.acceptBtnTxt}>Accept</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.declineBtn} onPress={() => handleDecline(c._id)}>
+                      <Text style={s.declineBtnTxt}>Decline</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            );
+          })}
+        </ScrollView>
+      )}
+
+      {/* ── Create Challenge Modal ── */}
+      <Modal visible={showCreateModal} animationType="slide" transparent onRequestClose={() => setShowCreateModal(false)}>
+        <View style={s.modalOverlay}>
+          <View style={s.modalBox}>
+            <Text style={s.modalTitle}>Challenge {selectedFriend?.name}</Text>
+            <Text style={s.modalSub}>Fixed duration: 7 days</Text>
+            <Text style={s.modalLabel}>Habit name</Text>
+            <TextInput
+              style={s.modalInput}
+              value={habitInput}
+              onChangeText={setHabitInput}
+              placeholder="e.g. Morning Run"
+              placeholderTextColor={colors.textMuted}
+              autoFocus
+            />
+            {myHabits.length > 0 && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:14}}>
+                {myHabits.map(h => (
+                  <TouchableOpacity key={h._id} style={[s.habitChip, habitInput===h.name && s.habitChipActive]} onPress={() => setHabitInput(h.name)}>
+                    <Text style={[s.habitChipTxt, habitInput===h.name && {color:'#fff'}]}>{h.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
+            <TouchableOpacity style={[s.sendBtn, sending && {opacity:0.6}]} onPress={handleSendChallenge} disabled={sending}>
+              <Text style={s.sendBtnTxt}>{sending ? 'Sending...' : '⚔️ Send Challenge'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.cancelBtn} onPress={() => setShowCreateModal(false)}>
+              <Text style={s.cancelBtnTxt}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -404,9 +590,55 @@ const makeStyles = (colors) => StyleSheet.create({
   friendSub:  { color: colors.textMuted, fontSize: 12, marginTop: 2 },
   friendArrow:{ color: colors.textMuted, fontSize: 20, paddingLeft: 8 },
   longPressHint: { color: colors.textMuted, fontSize: 11, textAlign: 'center', marginTop: 10 },
+  challengeBtn:    { backgroundColor: colors.primary+'22', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginRight: 6 },
+  challengeBtnTxt: { fontSize: 16 },
 
   emptyFriends: { alignItems: 'center', paddingVertical: 24 },
   emptyEmoji:   { fontSize: 40, marginBottom: 10 },
   emptyTitle:   { color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
   emptySub:     { color: colors.textMuted, fontSize: 12, marginTop: 6, textAlign: 'center' },
+
+  // Tab switcher
+  tabSwitch:       { flexDirection: 'row', backgroundColor: colors.border+'88', borderRadius: 10, padding: 3 },
+  tabBtn:          { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8 },
+  tabBtnActive:    { backgroundColor: colors.primary },
+  tabBtnTxt:       { color: colors.textMuted, fontSize: 12, fontWeight: '600' },
+  tabBtnTxtActive: { color: '#fff' },
+
+  // Challenge cards
+  challengeCard:    { backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 12 },
+  challengeCardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  statusPill:       { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1 },
+  statusPillTxt:    { fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
+  challengeDays:    { color: colors.textMuted, fontSize: 11, fontWeight: '600' },
+  challengeHabit:   { color: colors.textPrimary, fontSize: 16, fontWeight: '800', marginBottom: 6 },
+  challengePlayers: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  challengePlayer:  { color: colors.textSecondary, fontSize: 13, fontWeight: '600', flex: 1 },
+  challengeVs:      { color: colors.textMuted, fontSize: 12, paddingHorizontal: 8 },
+  gridRow:          { gap: 6, marginBottom: 8 },
+  dayGrid:          { flexDirection: 'row', gap: 4 },
+  dayDot:           { width: 28, height: 28, borderRadius: 6, backgroundColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+  dayDotDone:       { backgroundColor: colors.primary },
+  dayDotTxt:        { color: '#fff', fontSize: 11, fontWeight: '700' },
+  resultTxt:        { color: colors.textPrimary, fontSize: 14, fontWeight: '700', textAlign: 'center', marginTop: 8 },
+  pendingActions:   { flexDirection: 'row', gap: 10, marginTop: 10 },
+  acceptBtn:        { flex: 1, backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
+  acceptBtnTxt:     { color: '#fff', fontWeight: '700', fontSize: 13 },
+  declineBtn:       { flex: 1, borderWidth: 1, borderColor: colors.danger||'#ef4444', borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
+  declineBtnTxt:    { color: colors.danger||'#ef4444', fontWeight: '700', fontSize: 13 },
+
+  // Create challenge modal
+  modalOverlay:  { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  modalBox:      { backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 36 },
+  modalTitle:    { color: colors.textPrimary, fontSize: 18, fontWeight: '800', marginBottom: 4 },
+  modalSub:      { color: colors.textMuted, fontSize: 12, marginBottom: 16 },
+  modalLabel:    { color: colors.textSecondary, fontSize: 12, fontWeight: '600', marginBottom: 6 },
+  modalInput:    { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: colors.textPrimary, fontSize: 15, marginBottom: 12 },
+  habitChip:     { backgroundColor: colors.border, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7, marginRight: 8 },
+  habitChipActive:{ backgroundColor: colors.primary },
+  habitChipTxt:  { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
+  sendBtn:       { backgroundColor: colors.primary, borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginBottom: 10 },
+  sendBtnTxt:    { color: '#fff', fontWeight: '800', fontSize: 15 },
+  cancelBtn:     { alignItems: 'center', paddingVertical: 10 },
+  cancelBtnTxt:  { color: colors.textMuted, fontSize: 14 },
 });

@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme, DARK } from '../context/ThemeContext';
-import api from '../lib/api';
+import api from '../lib/axios';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 function progressLabel(type, progress, target) {
