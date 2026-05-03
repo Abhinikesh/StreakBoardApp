@@ -20,6 +20,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import api from '../lib/axios';
 import { playTickSound, playCrossSound } from '../lib/sound';
+import { markUserActive } from '../lib/reengagement';
+import { triggerComebackIfEligible, markComebackLoggedToday } from '../lib/comeback';
 import { useTheme } from '../context/ThemeContext';
 
 
@@ -148,7 +150,10 @@ export default function DashboardScreen({ navigation }) {
   const [soundEnabled,       setSoundEnabled]       = useState(true);
   const [userAvatar,         setUserAvatar]         = useState(null);
   const [showNoteSuccess,    setShowNoteSuccess]    = useState(false);
-  const progressAnim = useRef(new Animated.Value(0)).current;
+  const [comebackBanner,     setComebackBanner]     = useState(null); // { title, body, best }
+  const progressAnim  = useRef(new Animated.Value(0)).current;
+  const bannerAnim    = useRef(new Animated.Value(0)).current;
+  const bannerFireAnim = useRef(new Animated.Value(1)).current;
 
   // ── Fetch all data ──────────────────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
@@ -243,6 +248,12 @@ export default function DashboardScreen({ navigation }) {
       const entry    = habitLogs[habit._id] || { allLogs: [], todayLog: null };
       const todayLog = entry.todayLog;
 
+      // Pre-checks for comeback detection (captured BEFORE the API mutates state)
+      const wasFirstLogToday = !Object.values(habitLogs).some((l) => l.todayLog !== null);
+      const wasAllZeroStreak = habits.every(
+        (h) => computeStreak(habitLogs[h._id]?.allLogs || []) === 0
+      );
+
       try {
         if (todayLog) {
           if (todayLog.status === status) {
@@ -266,6 +277,35 @@ export default function DashboardScreen({ navigation }) {
           }));
         }
         await refreshHabitLogs(habit._id);
+        // Mark user active → cancels re-engagement notifications
+        markUserActive().catch(() => {});
+
+        // ── Comeback detection ───────────────────────────────────────────
+        // Trigger only when: this is 'done', was the FIRST log today across all
+        // habits, AND all computed streaks were 0 before this log.
+        if (status === 'done' && wasFirstLogToday && wasAllZeroStreak) {
+          triggerComebackIfEligible().then((banner) => {
+            if (banner) {
+              setComebackBanner(banner);
+              bannerAnim.setValue(0);
+              bannerFireAnim.setValue(1);
+              // Entrance animation
+              Animated.spring(bannerAnim, {
+                toValue: 1, tension: 60, friction: 9, useNativeDriver: true,
+              }).start();
+              // Fire flicker loop
+              Animated.loop(Animated.sequence([
+                Animated.timing(bannerFireAnim, { toValue: 1.2, duration: 350, useNativeDriver: true }),
+                Animated.timing(bannerFireAnim, { toValue: 1.0, duration: 350, useNativeDriver: true }),
+              ])).start();
+              // Auto-dismiss after 6 seconds
+              setTimeout(() => setComebackBanner(null), 6000);
+            }
+          }).catch(() => {});
+        } else if (status === 'done') {
+          markComebackLoggedToday().catch(() => {});
+        }
+
         // Play sound after successful log
         if (status === 'done')   playTickSound(soundEnabled).catch(() => {});
         if (status === 'missed') playCrossSound(soundEnabled).catch(() => {});
@@ -464,6 +504,32 @@ export default function DashboardScreen({ navigation }) {
             <Text style={styles.statLabel}>Missed</Text>
           </View>
         </View>
+
+        {/* ── Comeback banner (animated, dismisses after 6s) ── */}
+        {comebackBanner && (
+          <Animated.View style={[
+            styles.comebackBanner,
+            {
+              opacity: bannerAnim,
+              transform: [{
+                translateY: bannerAnim.interpolate({
+                  inputRange: [0, 1], outputRange: [-40, 0],
+                }),
+              }],
+            },
+          ]}>
+            <Animated.Text style={[styles.comebackFire, { transform: [{ scale: bannerFireAnim }] }]}>
+              🔥
+            </Animated.Text>
+            <View style={styles.comebackTextCol}>
+              <Text style={styles.comebackTitle}>{comebackBanner.title}</Text>
+              <Text style={styles.comebackBody}>{comebackBanner.body}</Text>
+            </View>
+            <TouchableOpacity onPress={() => setComebackBanner(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={styles.comebackClose}>✕</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        )}
 
         {/* ── Progress bar ── */}
         {habits.length > 0 && (
@@ -1471,4 +1537,29 @@ const makeStyles = (colors) => StyleSheet.create({
     fontSize: 16,
     textAlign: 'center',
   },
+
+  // ── Comeback banner ───────────────────────────────────────────────────────
+  comebackBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#4c1d95',   // deep purple — distinct from card
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#7c3aed',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 14,
+    gap: 10,
+    // Subtle top highlight for gradient feel
+    shadowColor: '#7c3aed',
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  comebackFire:    { fontSize: 32 },
+  comebackTextCol: { flex: 1 },
+  comebackTitle:   { color: '#ffffff', fontSize: 15, fontWeight: '700', marginBottom: 2 },
+  comebackBody:    { color: 'rgba(255,255,255,0.82)', fontSize: 12, lineHeight: 17 },
+  comebackClose:   { color: 'rgba(255,255,255,0.5)', fontSize: 18, paddingLeft: 4 },
 });
+

@@ -1,21 +1,234 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
-  View, Text, ScrollView, TouchableOpacity, TextInput,
-  StyleSheet, ActivityIndicator, Image,
-  StatusBar, RefreshControl,
+  View, Text, ScrollView, FlatList, TouchableOpacity, TextInput,
+  StyleSheet, ActivityIndicator, Image, Animated, Easing,
+  StatusBar, RefreshControl, Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../lib/axios';
 import { useTheme } from '../context/ThemeContext';
+import { getComebackStatus } from '../lib/comeback';
+
+// ── Snapshot helpers for "Most Improved" ─────────────────────────────────────
+const SNAP_KEY = 'lb_streak_snapshots_v1';
+async function saveSnapshot(entries) {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const raw = await AsyncStorage.getItem(SNAP_KEY);
+    const snaps = raw ? JSON.parse(raw) : {};
+    if (snaps[today]) return snaps; // already saved today
+    snaps[today] = {};
+    for (const e of entries) {
+      const id = e._id || e.id;
+      if (id) snaps[today][id] = e.currentStreak;
+    }
+    // Keep only last 14 days
+    const keys = Object.keys(snaps).sort();
+    if (keys.length > 14) keys.slice(0, keys.length - 14).forEach(k => delete snaps[k]);
+    await AsyncStorage.setItem(SNAP_KEY, JSON.stringify(snaps));
+    return snaps;
+  } catch (_) { return {}; }
+}
+async function loadSnapshots() {
+  try { const r = await AsyncStorage.getItem(SNAP_KEY); return r ? JSON.parse(r) : {}; }
+  catch (_) { return {}; }
+}
+function calcMostImproved(entries, snaps) {
+  const today = new Date();
+  let old = null;
+  for (let i = 7; i >= 4; i--) {
+    const d = new Date(today); d.setDate(d.getDate() - i);
+    const k = d.toISOString().split('T')[0];
+    if (snaps[k]) { old = snaps[k]; break; }
+  }
+  if (!old) return null;
+  let best = null;
+  for (const e of entries) {
+    const id = e._id || e.id; if (!id) continue;
+    const prev = old[id]; if (prev === undefined) continue;
+    const gain = e.currentStreak - prev;
+    if (gain <= 0) continue;
+    if (!best || gain > best.gain || (gain === best.gain && e.currentStreak > best.entry.currentStreak))
+      best = { entry: e, gain };
+  }
+  return best;
+}
+
+// ── Podium visual constants ───────────────────────────────────────────────────
+// 2-tone gradient simulation: [base, highlight overlay colour]
+const PODIUM_GRAD = [
+  { base: '#B8860B', top: 'rgba(255,220,60,0.35)'  }, // gold
+  { base: '#708090', top: 'rgba(255,255,255,0.20)'  }, // silver
+  { base: '#8B4513', top: 'rgba(220,160,80,0.25)'  }, // bronze
+];
+const SPARKLE_POS = [
+  { x: -32, y: -28 }, { x: 32, y: -28 }, { x: -18, y: -46 }, { x: 18, y: -46 }, { x: 0, y: -50 },
+];
 
 const MEDAL       = ['🥇', '🥈', '🥉'];
 const MEDAL_COLOR = ['#FFD700', '#C0C0C0', '#CD7F32'];
-const PODIUM_BG   = ['#7C3AED', '#6B7280', '#9CA3AF'];
-const PODIUM_H    = [90, 60, 50]; // heights for 1st, 2nd, 3rd
+const PODIUM_H    = [90, 60, 50];
 
 // A user is considered "inactive" when their current streak is 0
 const isInactive = (entry) => (entry?.currentStreak ?? 0) === 0;
+
+// ── Rank badge helper ─────────────────────────────────────────────────────────
+function RankBadge({ rank, colors }) {
+  if (rank <= 3) return null; // podium ranks not shown in list
+  if (rank <= 10) return (
+    <View style={{
+      backgroundColor: colors.primary, borderRadius: 8,
+      paddingHorizontal: 7, paddingVertical: 3, minWidth: 34, alignItems: 'center',
+    }}>
+      <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>#{rank}</Text>
+    </View>
+  );
+  if (rank <= 25) return (
+    <View style={{
+      backgroundColor: colors.border, borderRadius: 8,
+      paddingHorizontal: 7, paddingVertical: 3, minWidth: 34, alignItems: 'center',
+    }}>
+      <Text style={{ color: colors.textPrimary, fontSize: 11, fontWeight: '700' }}>#{rank}</Text>
+    </View>
+  );
+  return (
+    <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: '500', minWidth: 34, textAlign: 'center' }}>
+      #{rank}
+    </Text>
+  );
+}
+
+// ── Active dot indicator ──────────────────────────────────────────────────────
+function ActiveDot({ active }) {
+  return (
+    <View style={{
+      width: 10, height: 10, borderRadius: 5,
+      backgroundColor: active ? '#22C55E' : '#6B7280',
+      position: 'absolute', bottom: 1, right: 1,
+      borderWidth: 1.5, borderColor: '#fff',
+    }} />
+  );
+}
+
+// ── Memoized list row (avoids re-render on parent scroll) ─────────────────────
+const LeaderboardRow = memo(function LeaderboardRow({
+  entry, rank, globalIdx, me, inactive, filter, tab,
+  comebackActive, colors, onPress,
+}) {
+  const pressAnim = useRef(new Animated.Value(1)).current;
+
+  const onPressIn = () => Animated.timing(pressAnim, {
+    toValue: 0.97, duration: 80, useNativeDriver: true,
+  }).start();
+  const onPressOut = () => Animated.timing(pressAnim, {
+    toValue: 1, duration: 120, useNativeDriver: true,
+  }).start();
+
+  const isActive = !inactive;
+
+  // Value display
+  let valText, valColor;
+  if (tab === 'streak') {
+    if (isActive) {
+      valText = `${entry.currentStreak} 🔥`;
+      valColor = '#22C55E';
+    } else {
+      valText = `0 💤`;
+      valColor = colors.textMuted;
+    }
+  } else if (tab === 'rate') {
+    valText = `${Math.round(entry.completionRate ?? 0)}%`;
+    valColor = '#f59e0b';
+  } else {
+    valText = `${entry.totalDone ?? 0} ✅`;
+    valColor = '#22C55E';
+  }
+  if (inactive && filter === 'all') valColor = colors.textMuted;
+
+  // Row left-border accent
+  const borderColor = inactive
+    ? colors.border
+    : globalIdx < 3 ? MEDAL_COLOR[globalIdx]
+    : rank <= 10 ? colors.primary
+    : colors.border;
+
+  return (
+    <Pressable onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut}>
+      <Animated.View style={[
+        {
+          flexDirection: 'row', alignItems: 'center',
+          backgroundColor: me ? colors.primary + '1a' : colors.card,
+          borderRadius: 14,
+          borderWidth: 1,
+          borderColor: me ? colors.primary + '55' : colors.border,
+          borderLeftWidth: 4, borderLeftColor: borderColor,
+          paddingHorizontal: 12, paddingVertical: 11, marginBottom: 8,
+          opacity: inactive && filter === 'all' ? 0.62 : 1,
+        },
+        { transform: [{ scale: pressAnim }] },
+      ]}>
+        {/* Rank badge */}
+        <View style={{ width: 38, alignItems: 'center' }}>
+          {globalIdx < 3
+            ? <Text style={{ fontSize: 18 }}>{MEDAL[globalIdx]}</Text>
+            : <RankBadge rank={rank} colors={colors} />}
+        </View>
+
+        {/* Avatar + active dot */}
+        <View style={{ marginHorizontal: 10, position: 'relative' }}>
+          {renderAvatar(entry, 42, me ? colors.primary : null, inactive && filter === 'all')}
+          <ActiveDot active={isActive} />
+        </View>
+
+        {/* Name + badges */}
+        <View style={{ flex: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <Text
+              style={[
+                { color: colors.textPrimary, fontSize: 14, fontWeight: '600', flexShrink: 1 },
+                me && { color: colors.primary },
+                inactive && filter === 'all' && { color: colors.textMuted },
+              ]}
+              numberOfLines={1}
+            >
+              {entry.name || 'User'}
+            </Text>
+            {me && (
+              <View style={{ backgroundColor: colors.primary, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 }}>
+                <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>You</Text>
+              </View>
+            )}
+            {inactive && filter === 'all' && !me && (
+              <View style={{ backgroundColor: colors.border, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8 }}>
+                <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: '600' }}>Inactive</Text>
+              </View>
+            )}
+          </View>
+          {entry.email ? (
+            <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 1 }} numberOfLines={1}>
+              {entry.email}
+            </Text>
+          ) : null}
+        </View>
+
+        {/* Value + comeback badge */}
+        <View style={{ alignItems: 'flex-end', minWidth: 64 }}>
+          <Text style={{ fontSize: 15, fontWeight: '800', color: valColor }}>
+            {valText}
+          </Text>
+          {me && comebackActive && (
+            <Text style={{ color: colors.primary, fontSize: 10, fontWeight: '700', marginTop: 3 }}>
+              🔄 Comeback
+            </Text>
+          )}
+        </View>
+      </Animated.View>
+    </Pressable>
+  );
+});
+
 
 function getAvatarColor(name) {
   const palette = ['#7c3aed','#10b981','#ef4444','#f59e0b','#3b82f6','#ec4899','#14b8a6','#f97316'];
@@ -48,51 +261,121 @@ function renderAvatar(user, size = 44, borderColor = null, inactive = false) {
   );
 }
 
-// ── Podium card component ────────────────────────────────────────────────────
-function PodiumCard({ user, rankIdx, onPress, colors }) {
+// ── Podium card component (animated) ─────────────────────────────────────────
+function PodiumCard({ user, rankIdx, onPress, colors, entranceAnim, glowAnim, fireAnim, crownAnim, sparkleAnims }) {
   const rank       = rankIdx + 1;
   const avatarSize = rank === 1 ? 72 : 60;
   const cardFlex   = rank === 1 ? 1.2 : 1;
+  const isFirst    = rank === 1;
+  const grad       = PODIUM_GRAD[rankIdx];
+
+  const cardStyle = {
+    opacity:   entranceAnim,
+    transform: [{ translateY: entranceAnim.interpolate({ inputRange: [0, 1], outputRange: [80, 0] }) }],
+  };
+
+  // #1 crown bounce
+  const crownStyle = isFirst && crownAnim ? {
+    transform: [{ translateY: crownAnim }],
+  } : {};
+
+  // #1 glow ring (Animated.View behind avatar)
+  const glowRingStyle = isFirst && glowAnim ? {
+    position: 'absolute',
+    width: avatarSize + 20, height: avatarSize + 20,
+    borderRadius: (avatarSize + 20) / 2,
+    top: -10, left: -10,
+    backgroundColor: '#FFD700',
+    opacity: glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0.15, 0.55] }),
+    transform: [{ scale: glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0.88, 1.08] }) }],
+  } : null;
+
+  // #1 fire scale
+  const fireStyle = isFirst && fireAnim ? {
+    transform: [{ scale: fireAnim }],
+  } : {};
 
   return (
-    <TouchableOpacity
-      onPress={onPress}
-      activeOpacity={0.85}
-      style={{ alignItems: 'center', flex: cardFlex, paddingHorizontal: 4 }}
-    >
-      <Text style={{ fontSize: 22, marginBottom: 6 }}>{MEDAL[rankIdx]}</Text>
+    <Animated.View style={[{ alignItems: 'center', flex: cardFlex, paddingHorizontal: 4 }, cardStyle]}>
+      <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={{ alignItems: 'center' }}>
 
-      {/* Avatar with medal-coloured glow */}
-      <View style={{
-        shadowColor: MEDAL_COLOR[rankIdx], shadowOpacity: 0.7,
-        shadowRadius: 10, elevation: 8,
-        borderRadius: avatarSize / 2, marginBottom: 8,
-      }}>
-        {renderAvatar(user, avatarSize, MEDAL_COLOR[rankIdx])}
-      </View>
+        {/* Crown / medal — bounces for #1 */}
+        <Animated.Text style={[{ fontSize: 22, marginBottom: 6 }, crownStyle]}>
+          {MEDAL[rankIdx]}
+        </Animated.Text>
 
-      <Text
-        style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 12,
-                 textAlign: 'center', maxWidth: 90, marginBottom: 2 }}
-        numberOfLines={1}
-      >
-        {user?.name || '—'}
-      </Text>
-      <Text style={{ color: MEDAL_COLOR[rankIdx], fontWeight: '800', fontSize: 15, marginBottom: 8 }}>
-        {user?.currentStreak ?? 0} 🔥
-      </Text>
+        {/* Avatar container — sparkles + glow ring only for #1 */}
+        <View style={{ position: 'relative', marginBottom: 8 }}>
+          {/* Glow ring */}
+          {glowRingStyle && <Animated.View style={glowRingStyle} />}
 
-      {/* Podium block */}
-      <View style={{
-        width: rank === 1 ? 80 : 66,
-        height: PODIUM_H[rankIdx],
-        backgroundColor: PODIUM_BG[rankIdx],
-        borderTopLeftRadius: 8, borderTopRightRadius: 8,
-        opacity: 0.9,
-      }} />
-    </TouchableOpacity>
+          {/* Sparkle particles — rendered only for #1 */}
+          {isFirst && sparkleAnims && SPARKLE_POS.map((pos, pi) => (
+            <Animated.Text
+              key={pi}
+              style={{
+                position: 'absolute',
+                left: avatarSize / 2 + pos.x - 8,
+                top: avatarSize / 2 + pos.y - 8,
+                fontSize: 14,
+                opacity: sparkleAnims[pi].opacity,
+                transform: [
+                  { scale: sparkleAnims[pi].scale },
+                  { translateX: sparkleAnims[pi].tx },
+                  { translateY: sparkleAnims[pi].ty },
+                ],
+                zIndex: 10,
+              }}
+            >✨</Animated.Text>
+          ))}
+
+          {/* Shadow shell */}
+          <View style={{
+            shadowColor: MEDAL_COLOR[rankIdx], shadowOpacity: 0.7,
+            shadowRadius: 10, elevation: 8,
+            borderRadius: avatarSize / 2,
+          }}>
+            {renderAvatar(user, avatarSize, MEDAL_COLOR[rankIdx])}
+          </View>
+        </View>
+
+        <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 12,
+                       textAlign: 'center', maxWidth: 90, marginBottom: 2 }}
+              numberOfLines={1}>
+          {user?.name || '—'}
+        </Text>
+
+        {/* Streak row — fire flickers for #1 */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+          <Text style={{ color: MEDAL_COLOR[rankIdx], fontWeight: '800', fontSize: 15 }}>
+            {user?.currentStreak ?? 0}{' '}
+          </Text>
+          <Animated.Text style={[{ fontSize: 15 }, fireStyle]}>🔥</Animated.Text>
+        </View>
+
+        {/* Podium block — 2-tone gradient simulation */}
+        <View style={{
+          width: rank === 1 ? 80 : 66, height: PODIUM_H[rankIdx],
+          backgroundColor: grad.base,
+          borderTopLeftRadius: 8, borderTopRightRadius: 8, overflow: 'hidden',
+        }}>
+          {/* Lighter top band for gradient look */}
+          <View style={{
+            position: 'absolute', top: 0, left: 0, right: 0, height: '45%',
+            backgroundColor: grad.top,
+            borderTopLeftRadius: 8, borderTopRightRadius: 8,
+          }} />
+          {/* Rank label inside block */}
+          <Text style={{ color: 'rgba(255,255,255,0.9)', fontWeight: '800', fontSize: 13,
+                         textAlign: 'center', marginTop: 6 }}>
+            #{rank}
+          </Text>
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
+
 
 // ── Main screen ──────────────────────────────────────────────────────────────
 export default function LeaderboardScreen({ navigation }) {
@@ -105,8 +388,24 @@ export default function LeaderboardScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [tab,        setTab]        = useState('streak');
   const [search,     setSearch]     = useState('');
-  // "active" = streak > 0 only  |  "all" = everyone
   const [filter,     setFilter]     = useState('active');
+  const [mostImproved, setMostImproved] = useState(null); // { entry, gain }
+  const [comebackStatus, setComebackStatus] = useState({ active: false, daysIn: 0 });
+
+  // ── Animation refs ─────────────────────────────────────────────────────
+  // podiumEntr[0]=3rd, [1]=1st, [2]=2nd (stagger order per spec)
+  const podiumEntr = useRef([0,1,2].map(() => new Animated.Value(0))).current;
+  const glowAnim   = useRef(new Animated.Value(0)).current;
+  const fireAnim   = useRef(new Animated.Value(1)).current;
+  const crownAnim  = useRef(new Animated.Value(0)).current;
+  const arrowAnim  = useRef(new Animated.Value(0)).current;
+  // Sparkle: each has opacity, scale, tx, ty
+  const sparkles   = useRef(SPARKLE_POS.map(() => ({
+    opacity: new Animated.Value(0),
+    scale:   new Animated.Value(0),
+    tx:      new Animated.Value(0),
+    ty:      new Animated.Value(0),
+  }))).current;
 
   const fetchAll = useCallback(async () => {
     try {
@@ -126,6 +425,70 @@ export default function LeaderboardScreen({ navigation }) {
       setEntries(normalised);
       setMyId(meRes.data?._id || meRes.data?.id || null);
     } catch (_) {}
+  }, []);
+
+  // ── Snapshot + Most Improved: load old snap, save today's, compute winner ─
+  useEffect(() => {
+    if (!entries.length) return;
+    (async () => {
+      const snaps = await loadSnapshots();
+      const mi = calcMostImproved(entries, snaps);
+      setMostImproved(mi);
+      await saveSnapshot(entries); // idempotent (once per day)
+    })();
+  }, [entries]);
+
+  // ── Load comeback status for current user's badge ───────────────────────
+  useFocusEffect(useCallback(() => {
+    getComebackStatus().then(setComebackStatus).catch(() => {});
+  }, []));
+
+  // ── Podium entrance: staggered spring (3rd → 1st → 2nd) ────────────────────
+  useEffect(() => {
+    if (loading) { podiumEntr.forEach(a => a.setValue(0)); return; }
+    Animated.stagger(200, podiumEntr.map(a =>
+      Animated.spring(a, { toValue: 1, tension: 55, friction: 8, useNativeDriver: true })
+    )).start();
+  }, [loading]);
+
+  // ── Sparkle particles: one-shot burst on load, no loop ─────────────────
+  useEffect(() => {
+    if (loading) return;
+    const anims = sparkles.map((sp, i) =>
+      Animated.sequence([
+        Animated.delay(300 + i * 80),
+        Animated.parallel([
+          Animated.timing(sp.opacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+          Animated.timing(sp.scale,   { toValue: 1, duration: 200, useNativeDriver: true }),
+          Animated.timing(sp.tx, { toValue: SPARKLE_POS[i].x * 0.4, duration: 400, useNativeDriver: true }),
+          Animated.timing(sp.ty, { toValue: SPARKLE_POS[i].y * 0.4, duration: 400, useNativeDriver: true }),
+        ]),
+        Animated.timing(sp.opacity, { toValue: 0, duration: 600, delay: 600, useNativeDriver: true }),
+      ])
+    );
+    Animated.parallel(anims).start();
+  }, [loading]);
+
+  // ── Continuous loops: glow, fire, crown, arrow ─────────────────────────
+  useEffect(() => {
+    const glow = Animated.loop(Animated.sequence([
+      Animated.timing(glowAnim, { toValue: 1, duration: 1200, easing: Easing.inOut(Easing.sine), useNativeDriver: true }),
+      Animated.timing(glowAnim, { toValue: 0, duration: 1200, easing: Easing.inOut(Easing.sine), useNativeDriver: true }),
+    ]));
+    const fire = Animated.loop(Animated.sequence([
+      Animated.timing(fireAnim, { toValue: 1.18, duration: 400, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      Animated.timing(fireAnim, { toValue: 1.0,  duration: 400, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+    ]));
+    const crown = Animated.loop(Animated.sequence([
+      Animated.timing(crownAnim, { toValue: -6, duration: 900, easing: Easing.inOut(Easing.sine), useNativeDriver: true }),
+      Animated.timing(crownAnim, { toValue: 0,  duration: 900, easing: Easing.inOut(Easing.sine), useNativeDriver: true }),
+    ]));
+    const arrow = Animated.loop(Animated.sequence([
+      Animated.timing(arrowAnim, { toValue: -5, duration: 400, useNativeDriver: true }),
+      Animated.timing(arrowAnim, { toValue: 0,  duration: 400, useNativeDriver: true }),
+    ]));
+    glow.start(); fire.start(); crown.start(); arrow.start();
+    return () => { glow.stop(); fire.stop(); crown.stop(); arrow.stop(); };
   }, []);
 
   useFocusEffect(useCallback(() => { fetchAll(); }, [fetchAll]));
@@ -168,19 +531,60 @@ export default function LeaderboardScreen({ navigation }) {
     ? sorted.filter((e) => e.currentStreak > 0 || (e._id || e.id) === myId)
     : sorted;
 
-  const getVal = (entry) => {
-    if (!entry) return '—';
-    if (tab === 'streak') return `${entry.currentStreak ?? 0} 🔥`;
-    if (tab === 'rate')   return `${Math.round(entry.completionRate ?? 0)}%`;
-    return `${entry.totalDone ?? 0} ✅`;
-  };
+  // Build flat list items (rows + inline dividers) for FlatList
+  const listData = (() => {
+    const base = search.trim()
+      ? visibleSorted.filter((e) => (e.name || '').toLowerCase().includes(search.toLowerCase()))
+      : visibleSorted.slice(3);
+    if (!search.trim() && filter === 'all') {
+      const items = [];
+      let sepAdded = false;
+      base.forEach((e) => {
+        if (!sepAdded && isInactive(e)) {
+          sepAdded = true;
+          items.push({ type: 'divider', key: 'inactive-sep' });
+        }
+        items.push({ type: 'row', entry: e });
+      });
+      return items;
+    }
+    return base.map((e) => ({ type: 'row', entry: e }));
+  })();
 
-  const getValColor = (entry) => {
-    if (isInactive(entry) && filter === 'all') return colors.textMuted;
-    if (tab === 'streak') return colors.primary;
-    if (tab === 'rate')   return '#f59e0b';
-    return '#22C55E';
-  };
+  const renderListItem = useCallback(({ item }) => {
+    if (item.type === 'divider') {
+      return (
+        <View style={s.inactiveSep}>
+          <View style={s.inactiveSepLine} />
+          <Text style={s.inactiveSepTxt}>— Currently Inactive —</Text>
+          <View style={s.inactiveSepLine} />
+        </View>
+      );
+    }
+    const entry     = item.entry;
+    const id        = entry._id || entry.id;
+    const globalIdx = visibleSorted.findIndex((e) => (e._id || e.id) === id);
+    const rank      = globalIdx + 1;
+    return (
+      <LeaderboardRow
+        entry={entry}
+        rank={rank}
+        globalIdx={globalIdx}
+        me={isMe(entry)}
+        inactive={isInactive(entry)}
+        filter={filter}
+        tab={tab}
+        comebackActive={comebackStatus.active}
+        colors={colors}
+        onPress={() => navigateToProfile(entry)}
+      />
+    );
+  }, [visibleSorted, filter, tab, comebackStatus, colors, myId]);
+
+  const keyExtractor = useCallback((item) =>
+    item.type === 'divider' ? 'inactive-sep' : (item.entry?._id || item.entry?.id || 'unknown'),
+  []);
+
 
   const isMe = (entry) => entry?._id === myId || entry?.id === myId;
 
@@ -430,11 +834,16 @@ export default function LeaderboardScreen({ navigation }) {
                           : null}
                       </View>
 
-                      {/* Value */}
+                      {/* Value — 🔄 comeback badge shown only for current user */}
                       <View style={s.listValCol}>
                         <Text style={[s.listValNum, { color: getValColor(entry) }]}>
                           {getVal(entry)}
                         </Text>
+                        {me && comebackStatus.active && (
+                          <Text style={s.comebackRowBadge}>
+                            🔄 Comeback
+                          </Text>
+                        )}
                       </View>
                     </TouchableOpacity>
                   );
@@ -540,4 +949,10 @@ const makeStyles = (colors) => StyleSheet.create({
 
   listValCol:  { alignItems: 'flex-end', minWidth: 60 },
   listValNum:  { fontSize: 15, fontWeight: '800' },
+  comebackRowBadge: {
+    color: colors.primary,
+    fontSize: 10,
+    fontWeight: '700',
+    marginTop: 3,
+  },
 });

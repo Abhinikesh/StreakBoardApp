@@ -17,6 +17,7 @@ import {
   cancelHabitReminder,
   getReminderSettings,
 } from '../lib/notifications';
+import { getComebackStatus, updateBestStreak } from '../lib/comeback';
 
 import { WEB_BASE } from '../config/api';
 
@@ -58,6 +59,7 @@ export default function ProfileScreen({ navigation }) {
   const [avatarUri, setAvatarUri] = useState(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [habits, setHabits] = useState([]);
+  const [comebackStatus, setComebackStatus] = useState({ active: false, daysIn: 0, best: 0 });
 
   const fetchAll = useCallback(async () => {
     try {
@@ -86,6 +88,11 @@ export default function ProfileScreen({ navigation }) {
       const totalDone = allLogs.filter((l) => l.status === 'done').length;
       const bestStreak = logResults.reduce((m, logs) => Math.max(m, computeBestStreak(logs)), 0);
       setStats({ habits: active.length, totalDone, bestStreak });
+      // Update comeback module with latest best streak so it can personalise the banner
+      updateBestStreak(bestStreak).catch(() => {});
+      // Read comeback status for the badge
+      const cb = await getComebackStatus();
+      setComebackStatus(cb);
     } catch (_) { }
 
     try {
@@ -394,6 +401,16 @@ export default function ProfileScreen({ navigation }) {
             </React.Fragment>
           ))}
         </View>
+
+        {/* Comeback badge — shown for up to 3 days after returning */}
+        {comebackStatus.active && (
+          <View style={s.comebackBadgeRow}>
+            <Text style={s.comebackBadgeEmoji}>🔄</Text>
+            <Text style={s.comebackBadgeTxt}>
+              Comeback streak — day {comebackStatus.daysIn} of 3!
+            </Text>
+          </View>
+        )}
 
         {/* Member since */}
         <View style={s.section}>
@@ -729,5 +746,26 @@ const makeStyles = (colors) => StyleSheet.create({
   },
   themeSegBtnTxtActive: {
     color: '#ffffff',
+  },
+
+  // ── Comeback badge ────────────────────────────────────────────────────────
+  comebackBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(124,58,237,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.4)',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 12,
+    gap: 8,
+  },
+  comebackBadgeEmoji: { fontSize: 20 },
+  comebackBadgeTxt: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '700',
+    flex: 1,
   },
 });
