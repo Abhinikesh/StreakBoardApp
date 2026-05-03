@@ -10,6 +10,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../lib/axios';
 import { useTheme } from '../context/ThemeContext';
 import { getComebackStatus } from '../lib/comeback';
+import { useOffline } from '../context/OfflineContext';
+import OfflineWall from '../components/OfflineWall';
 
 // ── Snapshot helpers for "Most Improved" ─────────────────────────────────────
 const SNAP_KEY = 'lb_streak_snapshots_v1';
@@ -388,6 +390,8 @@ function PodiumCard({ user, rankIdx, onPress, colors, entranceAnim, glowAnim, fi
 export default function LeaderboardScreen({ navigation }) {
   const { colors } = useTheme();
   const s = makeStyles(colors);
+  const { isOnline } = useOffline();
+  if (!isOnline) return <OfflineWall colors={colors} onBack={() => navigation.goBack()} label="Leaderboard requires an internet connection." />;
 
   const [entries,    setEntries]    = useState([]);
   const [myId,       setMyId]       = useState(null);

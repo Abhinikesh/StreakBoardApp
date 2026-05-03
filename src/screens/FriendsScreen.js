@@ -9,6 +9,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import * as Clipboard from 'expo-clipboard';
 import api from '../lib/axios';
 import { useTheme } from '../context/ThemeContext';
+import { useOffline } from '../context/OfflineContext';
+import OfflineWall from '../components/OfflineWall';
 
 import { WEB_BASE } from '../config/api';
 
@@ -44,6 +46,8 @@ function getAvatarColor(name) {
 export default function FriendsScreen({ navigation }) {
   const { colors } = useTheme();
   const s = makeStyles(colors);
+  const { isOnline } = useOffline();
+  if (!isOnline) return <OfflineWall colors={colors} label="Friends &amp; messaging require an internet connection." />;
 
   const [shareData,    setShareData]    = useState({ shareCode: '', shareUrl: '', isProfilePublic: false });
   const [friends,      setFriends]      = useState([]);

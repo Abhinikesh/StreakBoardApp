@@ -10,6 +10,8 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme, DARK } from '../context/ThemeContext';
 import api from '../lib/axios';
+import { useOffline } from '../context/OfflineContext';
+import OfflineWall from '../components/OfflineWall';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 function progressLabel(type, progress, target) {
@@ -36,6 +38,8 @@ export default function WeeklyChallengeScreen({ navigation }) {
   const { theme, colors } = useTheme();
   const dark = theme === DARK;
   const s = makeStyles(colors, dark);
+  const { isOnline } = useOffline();
+  if (!isOnline) return <OfflineWall colors={colors} onBack={() => navigation.goBack()} label="Weekly Challenge requires an internet connection." />;
 
   const [data,       setData]       = useState(null);   // { challenge, progress, completed, rank }
   const [leaderboard,setLeaderboard]= useState([]);

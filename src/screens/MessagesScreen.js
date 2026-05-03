@@ -7,6 +7,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import api from '../lib/axios';
 import { useTheme } from '../context/ThemeContext';
+import { useOffline } from '../context/OfflineContext';
+import OfflineWall from '../components/OfflineWall';
 
 const PALETTE = ['#7c3aed','#10b981','#ef4444','#f59e0b','#3b82f6','#ec4899'];
 function avatarColor(name) { return PALETTE[(name?.charCodeAt(0) || 0) % PALETTE.length]; }
@@ -34,7 +36,10 @@ function timeLabel(dateStr) {
 
 export default function MessagesScreen({ navigation }) {
   const { colors } = useTheme();
+  const { isOnline } = useOffline();
   const s = makeStyles(colors);
+  if (!isOnline) return <OfflineWall colors={colors} onBack={() => navigation.goBack()} label="Messages require an internet connection." />;
+
   const [convos,     setConvos]     = useState([]);
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
