@@ -156,6 +156,7 @@ export default function DashboardScreen({ navigation }) {
   const [showLevelUp,        setShowLevelUp]        = useState(false);
   const [levelUpInfo,        setLevelUpInfo]        = useState({ level: 1, name: 'Beginner' });
   const [shieldCount,        setShieldCount]        = useState(0);
+  const [weeklyChallenge,    setWeeklyChallenge]    = useState(null); // { challenge, progress, completed, rank }
   const levelUpAnim = useRef(new Animated.Value(0)).current;
   const progressAnim  = useRef(new Animated.Value(0)).current;
   const bannerAnim    = useRef(new Animated.Value(0)).current;
@@ -176,6 +177,11 @@ export default function DashboardScreen({ navigation }) {
       setProfile(profileRes.data || { name: '', email: '' });
       if (xpRes.data) setXpData(xpRes.data);
       if (shieldRes.data) setShieldCount(shieldRes.data.shieldCount || 0);
+
+      // Weekly challenge — non-blocking
+      api.get('/api/weekly-challenge/my-progress')
+        .then(r => { if (r.data) setWeeklyChallenge(r.data); })
+        .catch(() => {});
 
       // Fetch all logs in parallel
       const logResults = await Promise.all(
@@ -772,6 +778,53 @@ export default function DashboardScreen({ navigation }) {
             );
           })
         )}
+
+        {/* ── Weekly Challenge Card ── */}
+        {weeklyChallenge?.challenge && (() => {
+          const wc  = weeklyChallenge.challenge;
+          const pct = Math.min(1, (weeklyChallenge.progress || 0) / (wc.targetValue || 1));
+          return (
+            <TouchableOpacity
+              style={styles.wcCard}
+              activeOpacity={0.87}
+              onPress={() => navigation.navigate('WeeklyChallenge')}
+            >
+              <View style={styles.wcCardHeader}>
+                <View style={styles.wcBadge}>
+                  <Text style={styles.wcBadgeTxt}>WEEKLY CHALLENGE</Text>
+                </View>
+                {wc.daysRemaining != null && (
+                  <Text style={styles.wcDaysLeft}>{wc.daysRemaining}d left</Text>
+                )}
+              </View>
+
+              <Text style={styles.wcTitle}>{wc.title}</Text>
+              <Text style={styles.wcDesc} numberOfLines={2}>{wc.description}</Text>
+
+              {/* Progress bar */}
+              <View style={styles.wcBarTrack}>
+                <View style={[styles.wcBarFill, { width: `${Math.round(pct * 100)}%` }]} />
+              </View>
+              <View style={styles.wcBarRow}>
+                <Text style={styles.wcBarLabel}>
+                  {weeklyChallenge.progress} / {wc.targetValue}{' '}
+                  {wc.type === 'daily_log' ? 'days' :
+                   wc.type === 'streak'    ? 'day streak' :
+                   wc.type === 'early_bird'? 'early days' : 'days'}
+                </Text>
+                <Text style={styles.wcParticipants}>
+                  {(wc.participantCount || 0).toLocaleString()} participants
+                </Text>
+              </View>
+
+              {weeklyChallenge.completed && (
+                <View style={styles.wcCompletedBadge}>
+                  <Text style={styles.wcCompletedTxt}>✓ Completed · +150 XP</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          );
+        })()}
       </ScrollView>
 
       {/* ── Section 5: Floating add button ── */}
@@ -1647,5 +1700,35 @@ const makeStyles = (colors) => StyleSheet.create({
   comebackTitle:   { color: '#ffffff', fontSize: 15, fontWeight: '700', marginBottom: 2 },
   comebackBody:    { color: 'rgba(255,255,255,0.82)', fontSize: 12, lineHeight: 17 },
   comebackClose:   { color: 'rgba(255,255,255,0.5)', fontSize: 18, paddingLeft: 4 },
+
+  // ── Weekly Challenge card ────────────────────────────────────────────────
+  wcCard: {
+    backgroundColor: colors.card,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.primary + '44',
+    marginHorizontal: 16,
+    marginTop: 18,
+    marginBottom: 8,
+    padding: 16,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  wcCardHeader:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  wcBadge:         { backgroundColor: colors.primary + '22', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  wcBadgeTxt:      { color: colors.primary, fontSize: 10, fontWeight: '800', letterSpacing: 0.6 },
+  wcDaysLeft:      { color: colors.textMuted, fontSize: 12, fontWeight: '600' },
+  wcTitle:         { color: colors.textPrimary, fontSize: 16, fontWeight: '800', marginBottom: 4 },
+  wcDesc:          { color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 12 },
+  wcBarTrack:      { height: 6, backgroundColor: colors.border, borderRadius: 4, overflow: 'hidden', marginBottom: 6 },
+  wcBarFill:       { height: '100%', backgroundColor: colors.primary, borderRadius: 4 },
+  wcBarRow:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  wcBarLabel:      { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
+  wcParticipants:  { color: colors.textMuted, fontSize: 11 },
+  wcCompletedBadge:{ marginTop: 10, backgroundColor: '#16a34a22', borderRadius: 8, borderWidth: 1, borderColor: '#16a34a44', paddingVertical: 6, alignItems: 'center' },
+  wcCompletedTxt:  { color: '#16a34a', fontSize: 13, fontWeight: '700' },
 });
 
