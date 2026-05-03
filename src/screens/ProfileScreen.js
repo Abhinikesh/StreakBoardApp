@@ -23,7 +23,7 @@ import { WEB_BASE } from '../config/api';
 const BASE_URL = WEB_BASE;
 
 function getAvatarColor(name) {
-  const palette = ['#7c3aed','#10b981','#ef4444','#f59e0b','#3b82f6','#ec4899','#14b8a6','#f97316'];
+  const palette = ['#7c3aed', '#10b981', '#ef4444', '#f59e0b', '#3b82f6', '#ec4899', '#14b8a6', '#f97316'];
   return palette[(name?.charCodeAt(0) || 0) % palette.length];
 }
 
@@ -42,22 +42,22 @@ export default function ProfileScreen({ navigation }) {
   const { colors, isDark, toggleTheme } = useTheme();
   const s = makeStyles(colors);
 
-  const [profile,          setProfile]          = useState({ name: '', email: '', createdAt: '', avatar: '' });
-  const [shareData,        setShareData]        = useState({ shareCode: '', shareUrl: '' });
-  const [loading,          setLoading]          = useState(true);
-  const [saving,           setSaving]           = useState(false);
-  const [editMode,         setEditMode]         = useState(false);
-  const [editName,         setEditName]         = useState('');
-  const [nameFocused,      setNameFocused]      = useState(false);
-  const [stats,            setStats]            = useState({ habits: 0, totalDone: 0, bestStreak: 0 });
-  const [notifEnabled,     setNotifEnabled]     = useState(false);
-  const [reminderTime,     setReminderTime]     = useState('20:00');
-  const [soundEnabled,     setSoundEnabled]     = useState(false);
-  const [copyText,         setCopyText]         = useState('Copy');
-  const [savingReminder,   setSavingReminder]   = useState(false);
-  const [avatarUri,        setAvatarUri]        = useState(null);
-  const [uploadingAvatar,  setUploadingAvatar]  = useState(false);
-  const [habits,           setHabits]           = useState([]);
+  const [profile, setProfile] = useState({ name: '', email: '', createdAt: '', avatar: '' });
+  const [shareData, setShareData] = useState({ shareCode: '', shareUrl: '' });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [nameFocused, setNameFocused] = useState(false);
+  const [stats, setStats] = useState({ habits: 0, totalDone: 0, bestStreak: 0 });
+  const [notifEnabled, setNotifEnabled] = useState(false);
+  const [reminderTime, setReminderTime] = useState('20:00');
+  const [soundEnabled, setSoundEnabled] = useState(false);
+  const [copyText, setCopyText] = useState('Copy');
+  const [savingReminder, setSavingReminder] = useState(false);
+  const [avatarUri, setAvatarUri] = useState(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [habits, setHabits] = useState([]);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -86,12 +86,12 @@ export default function ProfileScreen({ navigation }) {
       const totalDone = allLogs.filter((l) => l.status === 'done').length;
       const bestStreak = logResults.reduce((m, logs) => Math.max(m, computeBestStreak(logs)), 0);
       setStats({ habits: active.length, totalDone, bestStreak });
-    } catch (_) {}
+    } catch (_) { }
 
     try {
       const sound = await AsyncStorage.getItem('soundEnabled');
       setSoundEnabled(sound === 'true');
-    } catch (_) {}
+    } catch (_) { }
   }, []);
 
   useEffect(() => {
@@ -174,7 +174,7 @@ export default function ProfileScreen({ navigation }) {
   const handleShare = useCallback(async () => {
     const url = `${BASE_URL}/u/${shareData.shareCode}`;
     try { await Share.share({ message: `Track my habits on StreakBoard! ${url}`, url }); }
-    catch (_) {}
+    catch (_) { }
   }, [shareData.shareCode]);
 
   const handleLogout = useCallback(() => {
@@ -183,8 +183,8 @@ export default function ProfileScreen({ navigation }) {
       {
         text: 'LOG OUT', style: 'destructive',
         onPress: async () => {
-          try { await SecureStore.deleteItemAsync('token'); } catch (_) {}
-          try { setAuthToken(null); } catch (_) {}
+          try { await SecureStore.deleteItemAsync('token'); } catch (_) { }
+          try { setAuthToken(null); } catch (_) { }
           const parent = navigation.getParent();
           if (parent) {
             parent.reset({ index: 0, routes: [{ name: 'Login' }] });
@@ -252,11 +252,12 @@ export default function ProfileScreen({ navigation }) {
 
       const formData = new FormData();
       formData.append('file', { uri: localUri, name: filename || 'avatar.jpg', type });
-      formData.append('upload_preset', process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET);
+      formData.append('upload_preset', 'streakboard_avatars');
       formData.append('folder', 'avatars');
 
+      // ⚠️ Replace YOUR_CLOUD_NAME with your actual Cloudinary cloud name
       const cloudName = process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME;
-      // NOTE: Do NOT manually set Content-Type — fetch sets it with the correct multipart boundary
+      // NOTE: Do NOT manually set Content-Type — fetch will set it with the correct multipart boundary
       const response = await fetch(
         `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
         { method: 'POST', body: formData },
@@ -264,7 +265,7 @@ export default function ProfileScreen({ navigation }) {
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-      if (__DEV__) console.log('Cloudinary error:', errData);
+        if (__DEV__) console.log('Cloudinary error:', errData);
         throw new Error(errData?.error?.message || `Upload failed (${response.status})`);
       }
 
@@ -279,13 +280,13 @@ export default function ProfileScreen({ navigation }) {
       setAvatarUri(imageUrl);
       setProfile((p) => ({ ...p, avatar: imageUrl }));
 
-      // Persist into SecureStore user cache so Dashboard & other screens pick it up
+      // Persist into AsyncStorage user cache so Dashboard & other screens pick it up
       try {
-        const userStr = await SecureStore.getItemAsync('user_cache');
+        const userStr = await AsyncStorage.getItem('user');
         const user = userStr ? JSON.parse(userStr) : {};
         user.avatar = imageUrl;
-        await SecureStore.setItemAsync('user_cache', JSON.stringify(user));
-      } catch (_) {}
+        await AsyncStorage.setItem('user', JSON.stringify(user));
+      } catch (_) { }
 
       Alert.alert('✅ Updated!', 'Profile photo saved successfully.');
     } catch (e) {
@@ -297,8 +298,8 @@ export default function ProfileScreen({ navigation }) {
   };
 
 
-  const avatarBg   = getAvatarColor(profile.name);
-  const initial    = profile.name ? profile.name[0].toUpperCase() : '?';
+  const avatarBg = getAvatarColor(profile.name);
+  const initial = profile.name ? profile.name[0].toUpperCase() : '?';
   const memberSince = profile.createdAt
     ? new Date(profile.createdAt).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
     : 'April 2026';
@@ -591,9 +592,9 @@ export default function ProfileScreen({ navigation }) {
 }
 
 const makeStyles = (colors) => StyleSheet.create({
-  safe:    { flex: 1, backgroundColor: colors.bg },
-  center:  { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
-  scroll:  { flex: 1 },
+  safe: { flex: 1, backgroundColor: colors.bg },
+  center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
+  scroll: { flex: 1 },
   content: { paddingHorizontal: 20, paddingBottom: 120, paddingTop: 24 },
 
   avatarSection: { alignItems: 'center', marginBottom: 20 },
@@ -612,7 +613,7 @@ const makeStyles = (colors) => StyleSheet.create({
     width: 90, height: 90, borderRadius: 45,
     alignItems: 'center', justifyContent: 'center',
   },
-  avatarText:    { color: '#ffffff', fontSize: 36, fontWeight: '700' },
+  avatarText: { color: '#ffffff', fontSize: 36, fontWeight: '700' },
 
   // Camera badge overlay
   cameraBadge: {
@@ -631,60 +632,60 @@ const makeStyles = (colors) => StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center', alignItems: 'center',
   },
-  nameRow:       { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
-  profileName:   { color: colors.textPrimary, fontSize: 22, fontWeight: '700' },
-  editIcon:      { padding: 4 },
-  editIconTxt:   { fontSize: 16 },
-  profileEmail:  { color: colors.textMuted, fontSize: 13, marginTop: 4 },
-  editRow:       { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4, width: '100%' },
-  nameInput:     { flex: 1, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 12, height: 44, paddingHorizontal: 14, color: colors.textPrimary, fontSize: 16 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  profileName: { color: colors.textPrimary, fontSize: 22, fontWeight: '700' },
+  editIcon: { padding: 4 },
+  editIconTxt: { fontSize: 16 },
+  profileEmail: { color: colors.textMuted, fontSize: 13, marginTop: 4 },
+  editRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4, width: '100%' },
+  nameInput: { flex: 1, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 12, height: 44, paddingHorizontal: 14, color: colors.textPrimary, fontSize: 16 },
   nameInputFocused: { borderColor: colors.primary },
-  saveBtn:       { backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 14, height: 44, alignItems: 'center', justifyContent: 'center' },
-  saveBtnTxt:    { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
-  cancelBtn:     { backgroundColor: colors.card, borderRadius: 10, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border },
-  cancelBtnTxt:  { color: colors.textSecondary, fontSize: 16 },
+  saveBtn: { backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 14, height: 44, alignItems: 'center', justifyContent: 'center' },
+  saveBtnTxt: { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
+  cancelBtn: { backgroundColor: colors.card, borderRadius: 10, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border },
+  cancelBtnTxt: { color: colors.textSecondary, fontSize: 16 },
 
   statsGrid: { flexDirection: 'row', backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.border, paddingVertical: 16, marginBottom: 12, alignItems: 'center' },
-  statCell:  { flex: 1, alignItems: 'center' },
-  statIcon:  { fontSize: 20, marginBottom: 4 },
-  statNum:   { color: colors.textPrimary, fontSize: 20, fontWeight: '700' },
-  statLbl:   { color: colors.textMuted, fontSize: 11, marginTop: 2 },
-  statDiv:   { width: 1, height: 40, backgroundColor: colors.border },
+  statCell: { flex: 1, alignItems: 'center' },
+  statIcon: { fontSize: 20, marginBottom: 4 },
+  statNum: { color: colors.textPrimary, fontSize: 20, fontWeight: '700' },
+  statLbl: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  statDiv: { width: 1, height: 40, backgroundColor: colors.border },
 
-  section:      { backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.border, marginBottom: 12, overflow: 'hidden' },
+  section: { backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.border, marginBottom: 12, overflow: 'hidden' },
   sectionTitle: { color: colors.textMuted, fontSize: 11, fontWeight: '600', letterSpacing: 1, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 8 },
-  divider:      { height: 1, backgroundColor: colors.border, marginHorizontal: 16 },
+  divider: { height: 1, backgroundColor: colors.border, marginHorizontal: 16 },
 
-  settingRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 13 },
+  settingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 13 },
   settingLeft: { flex: 1, marginRight: 12 },
-  settingLabel:{ color: colors.textPrimary, fontSize: 14, fontWeight: '500' },
+  settingLabel: { color: colors.textPrimary, fontSize: 14, fontWeight: '500' },
   settingDesc: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
-  timeInput:   { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, color: colors.textPrimary, minWidth: 64, textAlign: 'center' },
+  timeInput: { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, color: colors.textPrimary, minWidth: 64, textAlign: 'center' },
   saveTimeBtn: { backgroundColor: colors.primary, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, marginLeft: 8 },
   saveTimeBtnTxt: { color: colors.textPrimary, fontSize: 13, fontWeight: '600' },
 
-  infoRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 13 },
-  infoLabel:{ color: colors.textSecondary, fontSize: 13 },
-  infoVal:  { color: colors.textPrimary, fontSize: 13, fontWeight: '500', maxWidth: '55%', textAlign: 'right' },
-  badge:    { backgroundColor: 'rgba(124,58,237,0.12)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
+  infoRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 13 },
+  infoLabel: { color: colors.textSecondary, fontSize: 13 },
+  infoVal: { color: colors.textPrimary, fontSize: 13, fontWeight: '500', maxWidth: '55%', textAlign: 'right' },
+  badge: { backgroundColor: 'rgba(124,58,237,0.12)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
   badgeTxt: { color: colors.primary, fontSize: 11, fontWeight: '600' },
 
-  urlRow:      { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.bg, borderRadius: 10, marginHorizontal: 16, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10 },
-  urlText:     { flex: 1, color: colors.textSecondary, fontSize: 12 },
-  copyBtn:     { backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, marginLeft: 8 },
+  urlRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.bg, borderRadius: 10, marginHorizontal: 16, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10 },
+  urlText: { flex: 1, color: colors.textSecondary, fontSize: 12 },
+  copyBtn: { backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, marginLeft: 8 },
   copyBtnText: { color: colors.textPrimary, fontSize: 12, fontWeight: '600' },
-  shareLinkBtn:{ borderWidth: 1, borderColor: colors.primary, borderRadius: 12, marginHorizontal: 16, marginBottom: 14, paddingVertical: 12, alignItems: 'center' },
-  shareLinkTxt:{ color: colors.primary, fontSize: 13, fontWeight: '600' },
+  shareLinkBtn: { borderWidth: 1, borderColor: colors.primary, borderRadius: 12, marginHorizontal: 16, marginBottom: 14, paddingVertical: 12, alignItems: 'center' },
+  shareLinkTxt: { color: colors.primary, fontSize: 13, fontWeight: '600' },
 
-  navRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 },
+  navRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 },
   navRowText: { color: colors.textPrimary, fontSize: 14, fontWeight: '500' },
-  navRowArrow:{ color: colors.textMuted, fontSize: 20 },
+  navRowArrow: { color: colors.textMuted, fontSize: 20 },
 
-  logoutBtn:    { height: 54, borderRadius: 14, borderWidth: 1.5, borderColor: colors.danger, alignItems: 'center', justifyContent: 'center', marginTop: 16, marginBottom: 8 },
+  logoutBtn: { height: 54, borderRadius: 14, borderWidth: 1.5, borderColor: colors.danger, alignItems: 'center', justifyContent: 'center', marginTop: 16, marginBottom: 8 },
   logoutBtnTxt: { color: colors.danger, fontSize: 16, fontWeight: '600' },
 
-  footer:        { alignItems: 'center', marginTop: 20 },
-  footerBrand:   { color: colors.textMuted, fontSize: 13 },
+  footer: { alignItems: 'center', marginTop: 20 },
+  footerBrand: { color: colors.textMuted, fontSize: 13 },
   footerTagline: { color: colors.borderHover, fontSize: 11, marginTop: 4 },
   footerVersion: { color: colors.borderHover, fontSize: 10, marginTop: 2 },
 });

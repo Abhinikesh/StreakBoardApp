@@ -16,7 +16,7 @@ export default function PublicProfileScreen({ route, navigation }) {
   const { colors } = useTheme();
   const s = makeStyles(colors);
 
-  const { shareCode, userName, userId } = route.params || {};
+  const { shareCode, userName, userId, currentStreak: paramCurrentStreak } = route.params || {};
 
   const [profile,  setProfile]  = useState(null);
   const [loading,  setLoading]  = useState(true);
@@ -79,11 +79,22 @@ export default function PublicProfileScreen({ route, navigation }) {
     ? new Date(p.createdAt).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
     : null;
 
+  // The API returns stats nested under `p.stats` (same endpoint the web version uses)
+  const st = p.stats || {};
+  // currentStreak comes from the leaderboard entry (passed as nav param) since
+  // the public-profile endpoint doesn't include it directly.
+  const currentStreak = paramCurrentStreak ?? p.currentStreak ?? st.currentStreak ?? 0;
+  const bestStreak    = st.longestStreak ?? st.bestStreak    ?? p.bestStreak    ?? p.longestStreak ?? 0;
+  const totalDone     = st.totalDone     ?? st.done          ?? p.totalDone     ?? 0;
+  const completionRate = Math.round(
+    st.overallRate ?? st.completionRate ?? p.overallRate ?? p.completionRate ?? 0
+  );
+
   const STATS = [
-    { label: 'Current Streak', value: `${p.currentStreak ?? 0} 🔥` },
-    { label: 'Best Streak',    value: `${p.bestStreak    ?? 0} ⭐` },
-    { label: 'Total Done',     value: `${p.totalDone     ?? 0} ✅` },
-    { label: 'Completion',     value: `${Math.round(p.overallRate ?? p.completionRate ?? 0)}%` },
+    { label: 'Current Streak', value: `${currentStreak} 🔥` },
+    { label: 'Best Streak',    value: `${bestStreak} ⭐` },
+    { label: 'Total Done',     value: `${totalDone} ✅` },
+    { label: 'Completion',     value: `${completionRate}%` },
   ];
 
   return (
@@ -144,7 +155,9 @@ export default function PublicProfileScreen({ route, navigation }) {
         </View>
 
         {/* ── Active habits ── */}
-        {Array.isArray(p.habits) && p.habits.length > 0 && (
+        {/* The public-profile API does not expose individual habit details for privacy.
+             The stats above (longestStreak, overallRate, etc.) reflect overall progress. */}
+        {Array.isArray(p.habits) && p.habits.length > 0 ? (
           <View style={s.card}>
             <Text style={s.cardTitle}>Active Habits ({p.habits.length})</Text>
             {p.habits.map((habit, i) => (
@@ -166,13 +179,12 @@ export default function PublicProfileScreen({ route, navigation }) {
               </View>
             ))}
           </View>
-        )}
-
-        {/* ── Empty habits ── */}
-        {(!Array.isArray(p.habits) || p.habits.length === 0) && (
+        ) : (
           <View style={s.card}>
-            <Text style={s.cardTitle}>Active Habits</Text>
-            <Text style={s.emptyHabits}>No public habits to show.</Text>
+            <Text style={s.cardTitle}>Habit Stats</Text>
+            <Text style={s.emptyHabits}>
+              {`${st.totalHabits ?? 0} habit${(st.totalHabits ?? 0) !== 1 ? 's' : ''} tracked  ·  ${st.activeDays ?? 0} active day${(st.activeDays ?? 0) !== 1 ? 's' : ''}`}
+            </Text>
           </View>
         )}
 

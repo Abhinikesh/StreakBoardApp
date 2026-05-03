@@ -173,9 +173,12 @@ export default function LeaderboardScreen({ navigation }) {
   const navigateToProfile = (user) => {
     if (!user) return;
     navigation.navigate('PublicProfile', {
-      shareCode: user.shareCode,
-      userName:  user.name,
-      userId:    user._id || user.id,
+      shareCode:     user.shareCode,
+      userName:      user.name,
+      userId:        user._id || user.id,
+      // Pass currentStreak from the leaderboard entry — the public-profile API
+      // doesn't return it directly, so we supply it as a nav param.
+      currentStreak: user.currentStreak ?? 0,
     });
   };
 
