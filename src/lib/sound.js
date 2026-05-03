@@ -1,76 +1,105 @@
+/**
+ * src/lib/sound.js
+ *
+ * Habit-log sound effects using expo-av.
+ *
+ * WHY LOCAL ASSETS: The previous implementation fetched sounds from remote
+ * URLs (mixkit.co). Any network delay or cold-start failure left tickSound /
+ * crossSound as null, so playAsync was never called — sounds were silently
+ * skipped.  Local WAV assets bundled with the app (assets/sounds/) load
+ * instantly at startup, work fully offline, and never fail due to network.
+ *
+ * Call preloadSounds() once in App.js useEffect (already wired up).
+ * Call unloadSounds() in the cleanup return of that same useEffect.
+ */
+
 import { Audio } from 'expo-av';
 
-let tickSound = null;
-let crossSound = null;
+// ── Bundled local sound assets ─────────────────────────────────────────────────
+// Generated short WAV tones: tick = 880 Hz bright pop, cross = 300 Hz low click
+const TICK_ASSET  = require('../../assets/sounds/tick.wav');
+const CROSS_ASSET = require('../../assets/sounds/cross.wav');
 
+let tickSound  = null;
+let crossSound = null;
+let preloaded  = false;
+
+// ── Preload both sounds once at app startup ────────────────────────────────────
 /**
- * Preload both sounds once at app startup.
- * Call this from App.js useEffect.
+ * Call from App.js useEffect — loads both sounds into memory so playback
+ * is instant when the user taps a habit button.
  */
 export async function preloadSounds() {
+  if (preloaded) return; // idempotent — safe to call multiple times
   try {
-    await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, staysActiveInBackground: false });
+    // Allow playback even when the iOS silent switch is on
+    await Audio.setAudioModeAsync({
+      playsInSilentModeIOS:    true,
+      staysActiveInBackground: false,
+    });
 
-    // TICK — short bright pop (✓ Done)
-    const tickResult = await Audio.Sound.createAsync(
-      { uri: 'https://assets.mixkit.co/sfx/preview/mixkit-fast-small-sweep-transition-166.mp3' },
-      { volume: 0.5, shouldPlay: false },
+    // TICK — bright high-pitched pop (✓ Done)
+    const { sound: tick } = await Audio.Sound.createAsync(
+      TICK_ASSET,
+      { volume: 0.6, shouldPlay: false },
     );
-    tickSound = tickResult.sound;
+    tickSound = tick;
 
-    // CROSS — soft low click (✗ Missed)
-    const crossResult = await Audio.Sound.createAsync(
-      { uri: 'https://assets.mixkit.co/sfx/preview/mixkit-clicking-on-a-small-button-2359.mp3' },
+    // CROSS — low muted click (✗ Missed / unchecked)
+    const { sound: cross } = await Audio.Sound.createAsync(
+      CROSS_ASSET,
       { volume: 0.4, shouldPlay: false },
     );
-    crossSound = crossResult.sound;
+    crossSound = cross;
+
+    preloaded = true;
   } catch (e) {
-    console.log('Sound preload failed:', e);
+    // Non-fatal — app works perfectly without sounds
+    if (__DEV__) console.warn('Sound preload failed:', e);
   }
 }
 
+// ── Play the ✓ Done tick sound ─────────────────────────────────────────────────
 /**
- * Play the ✓ Done tick sound.
- * @param {boolean} enabled  Pass your soundEnabled state value.
+ * @param {boolean} enabled  Pass the soundEnabled preference value.
  */
 export async function playTickSound(enabled = true) {
-  if (!enabled) return;
+  if (!enabled || !tickSound) return;
   try {
-    if (tickSound) {
-      await tickSound.setPositionAsync(0);
-      await tickSound.setVolumeAsync(0.5);
-      await tickSound.playAsync();
-    }
+    await tickSound.setPositionAsync(0);
+    await tickSound.setVolumeAsync(0.6);
+    await tickSound.playAsync();
   } catch (_) {
-    // never block UI for sound failures
+    // Never block the UI for a sound failure
   }
 }
 
+// ── Play the ✗ Missed / uncheck cross sound ───────────────────────────────────
 /**
- * Play the ✗ Missed cross sound.
- * @param {boolean} enabled  Pass your soundEnabled state value.
+ * @param {boolean} enabled  Pass the soundEnabled preference value.
  */
 export async function playCrossSound(enabled = true) {
-  if (!enabled) return;
+  if (!enabled || !crossSound) return;
   try {
-    if (crossSound) {
-      await crossSound.setPositionAsync(0);
-      await crossSound.setVolumeAsync(0.4);
-      await crossSound.playAsync();
-    }
+    await crossSound.setPositionAsync(0);
+    await crossSound.setVolumeAsync(0.4);
+    await crossSound.playAsync();
   } catch (_) {}
 }
 
+// ── Unload sounds to free memory ──────────────────────────────────────────────
 /**
- * Unload sounds to free memory (call on app unmount if needed).
+ * Call in the cleanup return of the App.js useEffect that called preloadSounds.
  */
 export async function unloadSounds() {
+  preloaded = false;
   try {
-    if (tickSound) { await tickSound.unloadAsync(); tickSound = null; }
+    if (tickSound)  { await tickSound.unloadAsync();  tickSound  = null; }
     if (crossSound) { await crossSound.unloadAsync(); crossSound = null; }
   } catch (_) {}
 }
 
-// ─── Legacy aliases kept so any other screen importing the old names doesn't break ───
+// ── Legacy aliases ─────────────────────────────────────────────────────────────
+// Kept so any import using the old names doesn't break.
 export const playDoneSound   = () => playTickSound(true);
 export const playMissedSound = () => playCrossSound(true);

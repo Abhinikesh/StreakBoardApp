@@ -192,15 +192,13 @@ export default function DashboardScreen({ navigation }) {
     })();
   }, [fetchAll]);
 
-  // Load sound preference
-  useEffect(() => {
+  // Reload avatar and sound preference every time this screen is focused
+  useFocusEffect(useCallback(() => {
+    // Re-read soundEnabled so toggling it in ProfileScreen takes effect immediately
     AsyncStorage.getItem('soundEnabled').then((val) => {
       setSoundEnabled(val !== 'false'); // default true
     }).catch(() => {});
-  }, []);
 
-  // Reload avatar from SecureStore every time this screen is focused
-  useFocusEffect(useCallback(() => {
     SecureStore.getItemAsync('user_cache').then((raw) => {
       if (raw) {
         try { setUserAvatar(JSON.parse(raw).avatar || null); } catch (_) {}
