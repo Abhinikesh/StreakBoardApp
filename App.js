@@ -5,6 +5,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Notifications from 'expo-notifications';
 import AppNavigator from './src/navigation/AppNavigator';
 import { ThemeProvider } from './src/context/ThemeContext';
+import { OfflineProvider } from './src/context/OfflineContext';
 import { preloadSounds, unloadSounds } from './src/lib/sound';
 import { checkReEngagement } from './src/lib/reengagement';
 
@@ -41,10 +42,12 @@ export default function App() {
 
   return (
     <ThemeProvider>
-      <SafeAreaProvider>
-        <StatusBar style="light" />
-        <AppNavigator />
-      </SafeAreaProvider>
+      <OfflineProvider>
+        <SafeAreaProvider>
+          <StatusBar style="light" />
+          <AppNavigator />
+        </SafeAreaProvider>
+      </OfflineProvider>
     </ThemeProvider>
   );
 }

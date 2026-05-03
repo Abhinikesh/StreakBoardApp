@@ -24,6 +24,15 @@ import { markUserActive } from '../lib/reengagement';
 import { triggerComebackIfEligible, markComebackLoggedToday } from '../lib/comeback';
 import { useTheme } from '../context/ThemeContext';
 import { getLevelInfo, getLevelIcon } from '../lib/xpLevels';
+import { useOffline } from '../context/OfflineContext';
+import { OfflineBanner, SyncToast } from '../components/OfflineUI';
+import {
+  getCachedHabits, saveHabitsToCache,
+  getCachedLogs,   saveLogsToCache,
+  getCachedProfile, saveProfileToCache,
+  getPendingQueue, addToPendingQueue,
+  applyLocalLog,
+} from '../lib/offlineStore';
 
 
 // ─── Emoji / color pickers ────────────────────────────────────────────────────
@@ -162,8 +171,24 @@ export default function DashboardScreen({ navigation }) {
   const bannerAnim    = useRef(new Animated.Value(0)).current;
   const bannerFireAnim = useRef(new Animated.Value(1)).current;
 
-  // ── Fetch all data ──────────────────────────────────────────────────────────
+  // ── Offline context ─────────────────────────────────────────────────────────
+  const { isOnline, refreshPendingCount } = useOffline();
+
+  // ── Fetch all data (cache-first / stale-while-revalidate) ───────────────────
   const fetchAll = useCallback(async () => {
+    // ── Step 1: load from cache instantly ──────────────────────────────────
+    const [cachedHabits, cachedLogs, cachedProfile] = await Promise.all([
+      getCachedHabits(), getCachedLogs(), getCachedProfile(),
+    ]);
+    if (cachedHabits) {
+      setHabits(cachedHabits);
+      setLoading(false); // fast path — user sees data immediately
+    }
+    if (cachedLogs)   setHabitLogs(cachedLogs);
+    if (cachedProfile) setProfile(cachedProfile);
+
+    // ── Step 2: refresh from server (background if cache hit) ──────────────
+    if (!isOnline) return; // no point trying if offline
     try {
       const [habitsRes, profileRes, xpRes, shieldRes] = await Promise.all([
         api.get('/api/habits'),
@@ -174,8 +199,13 @@ export default function DashboardScreen({ navigation }) {
 
       const activeHabits = (habitsRes.data || []).filter((h) => h.isActive);
       setHabits(activeHabits);
-      setProfile(profileRes.data || { name: '', email: '' });
-      if (xpRes.data) setXpData(xpRes.data);
+      await saveHabitsToCache(activeHabits);
+
+      const profile = profileRes.data || { name: '', email: '' };
+      setProfile(profile);
+      await saveProfileToCache(profile);
+
+      if (xpRes.data)    setXpData(xpRes.data);
       if (shieldRes.data) setShieldCount(shieldRes.data.shieldCount || 0);
 
       // Weekly challenge — non-blocking
@@ -200,10 +230,14 @@ export default function DashboardScreen({ navigation }) {
         logsMap[habitId] = { allLogs: logs, todayLog };
       }
       setHabitLogs(logsMap);
+      await saveLogsToCache(logsMap);
     } catch (err) {
-      Alert.alert('Error', 'Failed to load dashboard. Please refresh.');
+      // If server fetch fails but we had cache, don't alert — just keep cached data
+      if (!cachedHabits) {
+        Alert.alert('Error', 'Failed to load dashboard. Please refresh.');
+      }
     }
-  }, []);
+  }, [isOnline]);
 
   useEffect(() => {
     (async () => {
@@ -272,6 +306,44 @@ export default function DashboardScreen({ navigation }) {
         (h) => computeStreak(habitLogs[h._id]?.allLogs || []) === 0
       );
 
+      // ── OFFLINE path: queue locally, update UI optimistically ──────────────
+      if (!isOnline) {
+        const today = todayStr();
+        let op = 'log';
+        let newLogsMap;
+        if (todayLog) {
+          if (todayLog.status === status) {
+            // toggling off → delete
+            op = 'delete';
+            newLogsMap = await applyLocalLog(habit._id, today, status, 'delete');
+            await addToPendingQueue({
+              id: `${habit._id}_${today}_delete`,
+              op: 'delete', habitId: habit._id, date: today,
+              logId: todayLog._id,
+            });
+          } else {
+            // switching status
+            newLogsMap = await applyLocalLog(habit._id, today, status, 'log');
+            await addToPendingQueue({
+              id: `${habit._id}_${today}_log`,
+              op: 'log', habitId: habit._id, date: today, status,
+            });
+          }
+        } else {
+          newLogsMap = await applyLocalLog(habit._id, today, status, 'log');
+          await addToPendingQueue({
+            id: `${habit._id}_${today}_log`,
+            op: 'log', habitId: habit._id, date: today, status,
+          });
+        }
+        if (newLogsMap) setHabitLogs(newLogsMap);
+        if (status === 'done') playTickSound(soundEnabled).catch(() => {});
+        else playCrossSound(soundEnabled).catch(() => {});
+        await refreshPendingCount();
+        return; // skip server call
+      }
+
+      // ── ONLINE path (existing logic) ───────────────────────────────────────
       try {
         let logResponse = null;
         if (todayLog) {
@@ -473,6 +545,8 @@ export default function DashboardScreen({ navigation }) {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
+      <OfflineBanner colors={colors} />
+      <SyncToast colors={colors} />
 
       {/* ── Navbar ── */}
       <View style={styles.navbar}>
