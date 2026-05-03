@@ -397,6 +397,11 @@ export default function LeaderboardScreen({ navigation }) {
   const [filter,     setFilter]     = useState('active');
   const [mostImproved, setMostImproved] = useState(null); // { entry, gain }
   const [comebackStatus, setComebackStatus] = useState({ active: false, daysIn: 0 });
+  // ── Season state ─────────────────────────────────────────────────────────
+  const [viewMode,       setViewMode]       = useState('season');   // 'season' | 'alltime'
+  const [currentSeason,  setCurrentSeason]  = useState(null);
+  const [seasonEntries,  setSeasonEntries]  = useState([]);
+  const [mySeasonRank,   setMySeasonRank]   = useState(null);
 
   // ── Animation refs ─────────────────────────────────────────────────────
   // podiumEntr[0]=3rd, [1]=1st, [2]=2nd (stagger order per spec)
@@ -415,9 +420,12 @@ export default function LeaderboardScreen({ navigation }) {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [lbRes, meRes] = await Promise.all([
+      const [lbRes, meRes, seasonRes, seasonLbRes, myRankRes] = await Promise.all([
         api.get('/api/social/leaderboard'),
         api.get('/api/user/profile'),
+        api.get('/api/seasons/current').catch(() => ({ data: null })),
+        api.get('/api/seasons/leaderboard').catch(() => ({ data: [] })),
+        api.get('/api/seasons/my-rank').catch(() => ({ data: null })),
       ]);
       const raw = lbRes.data || [];
       const normalised = raw.map((e) => ({
@@ -430,6 +438,9 @@ export default function LeaderboardScreen({ navigation }) {
       }));
       setEntries(normalised);
       setMyId(meRes.data?._id || meRes.data?.id || null);
+      if (seasonRes.data)  setCurrentSeason(seasonRes.data);
+      setSeasonEntries(seasonLbRes.data || []);
+      if (myRankRes.data)  setMySeasonRank(myRankRes.data);
     } catch (_) {}
   }, []);
 
@@ -637,6 +648,24 @@ export default function LeaderboardScreen({ navigation }) {
         </View>
       </View>
 
+      {/* ── Season / All Time view switcher ── */}
+      <View style={s.viewSwitcher}>
+        <TouchableOpacity
+          style={[s.viewTab, viewMode === 'season'  && s.viewTabActive]}
+          onPress={() => setViewMode('season')}
+          activeOpacity={0.8}
+        >
+          <Text style={[s.viewTabTxt, viewMode === 'season'  && s.viewTabTxtActive]}>🌟 This Season</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[s.viewTab, viewMode === 'alltime' && s.viewTabActive]}
+          onPress={() => setViewMode('alltime')}
+          activeOpacity={0.8}
+        >
+          <Text style={[s.viewTabTxt, viewMode === 'alltime' && s.viewTabTxtActive]}>🏆 All Time</Text>
+        </TouchableOpacity>
+      </View>
+
       <ScrollView
         style={s.scroll}
         contentContainerStyle={s.content}
@@ -647,8 +676,85 @@ export default function LeaderboardScreen({ navigation }) {
             tintColor={colors.primary} colors={[colors.primary]} />
         }
       >
-        {/* ── Metric tab row ── */}
-        <View style={s.tabRow}>
+        {/* ───────────────────────────────────────── */}
+        {/* SEASON VIEW */}
+        {viewMode === 'season' && (
+          <>
+            {/* Season banner */}
+            <TouchableOpacity
+              onPress={() => navigation.navigate('SeasonDetail', { season: currentSeason })}
+              activeOpacity={0.85}
+              style={[s.seasonBanner, { backgroundColor: colors.primary + '14', borderColor: colors.primary + '44' }]}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={[s.seasonBannerTitle, { color: colors.primary }]}>
+                  🌟 {currentSeason?.name ?? 'Current Season'}
+                </Text>
+                {currentSeason?.daysRemaining != null && (
+                  <Text style={[s.seasonBannerSub, { color: colors.textMuted }]}>
+                    {currentSeason.daysRemaining} day{currentSeason.daysRemaining !== 1 ? 's' : ''} remaining · Tap for details
+                  </Text>
+                )}
+              </View>
+              <Text style={{ color: colors.textMuted, fontSize: 20 }}>›</Text>
+            </TouchableOpacity>
+
+            {/* My rank card */}
+            {mySeasonRank?.rank && (
+              <View style={[s.myRankCard, { backgroundColor: colors.primary + '11', borderColor: colors.primary + '33' }]}>
+                <Text style={[s.myRankNum, { color: colors.primary }]}>#{mySeasonRank.rank}</Text>
+                <View style={{ marginLeft: 14 }}>
+                  <Text style={[s.myRankLabel, { color: colors.textPrimary }]}>Your rank this season</Text>
+                  <Text style={[s.myRankStreak, { color: colors.textMuted }]}>{mySeasonRank.bestStreak} 🔥 best streak</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Season leaderboard list */}
+            {seasonEntries.length === 0 ? (
+              <View style={s.empty}>
+                <Text style={{ fontSize: 48, textAlign: 'center', marginTop: 40 }}>🌟</Text>
+                <Text style={s.emptyTitle}>Season just started!</Text>
+                <Text style={s.emptySub}>Log your habits to claim the top spot.</Text>
+              </View>
+            ) : (
+              seasonEntries.map((entry, i) => {
+                const MEDALS = ['🥇', '🥈', '🥉'];
+                const isMyEntry = entry._id === myId;
+                return (
+                  <TouchableOpacity
+                    key={entry._id || i}
+                    style={[s.seasonRow, {
+                      backgroundColor: isMyEntry ? colors.primary + '12' : colors.card,
+                      borderColor:     isMyEntry ? colors.primary + '55' : colors.border,
+                    }]}
+                    onPress={() => navigateToProfile(entry)}
+                    activeOpacity={0.82}
+                  >
+                    <Text style={s.seasonRowRank}>{i < 3 ? MEDALS[i] : `#${i + 1}`}</Text>
+                    {renderAvatar(entry, 40, isMyEntry ? colors.primary : null, false)}
+                    <View style={{ flex: 1, marginLeft: 10 }}>
+                      <Text style={[s.seasonRowName, { color: isMyEntry ? colors.primary : colors.textPrimary }]} numberOfLines={1}>
+                        {entry.name}
+                      </Text>
+                      <Text style={[s.seasonRowSub, { color: colors.textMuted }]}>Lv.{entry.currentLevel || 1}</Text>
+                    </View>
+                    <View style={[s.streakBadge, { backgroundColor: colors.primary + '18', borderColor: colors.primary + '33' }]}>
+                      <Text style={[s.streakBadgeTxt, { color: colors.primary }]}>{entry.bestStreak} 🔥</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })
+            )}
+          </>
+        )}
+
+        {/* ───────────────────────────────────────── */}
+        {/* ALL TIME VIEW */}
+        {viewMode === 'alltime' && (
+          <>
+            {/* ── Metric tab row ── */}
+            <View style={s.tabRow}>
           {TABS.map(([key, label]) => (
             <TouchableOpacity key={key} style={[s.tab, tab === key && s.tabActive]}
               onPress={() => setTab(key)} activeOpacity={0.75}>
@@ -766,6 +872,9 @@ export default function LeaderboardScreen({ navigation }) {
 
           </>
         )}
+
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -867,4 +976,34 @@ const makeStyles = (colors) => StyleSheet.create({
     fontWeight: '700',
     marginTop: 3,
   },
+
+  // ── Season / All Time view switcher ────────────────────────────────────────────
+  viewSwitcher:  { flexDirection: 'row', backgroundColor: colors.card, borderRadius: 0,
+                   borderBottomWidth: 1, borderBottomColor: colors.border, paddingHorizontal: 16 },
+  viewTab:       { flex: 1, alignItems: 'center', paddingVertical: 12 },
+  viewTabActive: { borderBottomWidth: 2.5, borderBottomColor: colors.primary },
+  viewTabTxt:    { fontSize: 13, fontWeight: '600', color: colors.textMuted },
+  viewTabTxtActive: { color: colors.primary },
+
+  // ── Season banner ─────────────────────────────────────────────────────
+  seasonBanner:      { flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1,
+                       paddingHorizontal: 16, paddingVertical: 14, marginBottom: 12 },
+  seasonBannerTitle: { fontSize: 15, fontWeight: '800' },
+  seasonBannerSub:   { fontSize: 12, marginTop: 3 },
+
+  // My rank card
+  myRankCard:   { flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1,
+                  paddingHorizontal: 16, paddingVertical: 12, marginBottom: 12 },
+  myRankNum:    { fontSize: 28, fontWeight: '900', minWidth: 52 },
+  myRankLabel:  { fontSize: 14, fontWeight: '700' },
+  myRankStreak: { fontSize: 12, marginTop: 2 },
+
+  // Season rows
+  seasonRow:     { flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1,
+                   paddingHorizontal: 12, paddingVertical: 11, marginBottom: 8 },
+  seasonRowRank: { fontSize: 20, width: 34, textAlign: 'center' },
+  seasonRowName: { fontSize: 14, fontWeight: '700' },
+  seasonRowSub:  { fontSize: 11, marginTop: 2 },
+  streakBadge:   { borderRadius: 12, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 4 },
+  streakBadgeTxt:{ fontSize: 13, fontWeight: '800' },
 });
