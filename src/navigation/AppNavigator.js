@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, Platform } from 'react-native';
+import React, { useEffect, useState, Component } from 'react';
+import { View, Text, Platform, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
@@ -15,8 +15,54 @@ import LeaderboardScreen from '../screens/LeaderboardScreen';
 import ProfileScreen     from '../screens/ProfileScreen';
 import JournalScreen       from '../screens/JournalScreen';
 import PublicProfileScreen from '../screens/PublicProfileScreen';
+import XpDetailScreen      from '../screens/XpDetailScreen';
+import SeasonDetailScreen  from '../screens/SeasonDetailScreen';
 import { useTheme, DARK } from '../context/ThemeContext';
 import SplashScreen from '../screens/SplashScreen';
+
+// ── Error Boundary: catches render errors in PublicProfileScreen ─────────────
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, info) {
+    console.error('[ErrorBoundary]', error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={{ flex: 1, backgroundColor: '#0f0f1a', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+          <Text style={{ fontSize: 40, marginBottom: 16 }}>🔒</Text>
+          <Text style={{ color: '#ffffff', fontSize: 17, fontWeight: '700', marginBottom: 8, textAlign: 'center' }}>
+            Something went wrong
+          </Text>
+          <Text style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13, textAlign: 'center', lineHeight: 20, marginBottom: 24 }}>
+            Could not load this profile. Please go back and try again.
+          </Text>
+          <TouchableOpacity
+            onPress={() => this.setState({ hasError: false, error: null })}
+            style={{ backgroundColor: '#7c3aed', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 28 }}
+          >
+            <Text style={{ color: '#ffffff', fontWeight: '600', fontSize: 14 }}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function SafePublicProfile(props) {
+  return (
+    <ErrorBoundary>
+      <PublicProfileScreen {...props} />
+    </ErrorBoundary>
+  );
+}
 
 const Stack = createStackNavigator();
 const Tab   = createBottomTabNavigator();
@@ -94,7 +140,9 @@ function RootStack({ initialRoute }) {
       <Stack.Screen name="Login"         component={LoginScreen} />
       <Stack.Screen name="Main"           component={MainTabs} />
       <Stack.Screen name="Journal"        component={JournalScreen} />
-      <Stack.Screen name="PublicProfile"  component={PublicProfileScreen} />
+      <Stack.Screen name="PublicProfile"  component={SafePublicProfile} />
+      <Stack.Screen name="XpDetail"       component={XpDetailScreen} />
+      <Stack.Screen name="SeasonDetail"   component={SeasonDetailScreen} />
     </Stack.Navigator>
   );
 }

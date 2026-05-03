@@ -11,6 +11,7 @@ import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api, { setAuthToken } from '../lib/axios';
 import { useTheme } from '../context/ThemeContext';
+import { getLevelInfo, getLevelIcon } from '../lib/xpLevels';
 import {
   requestNotificationPermission,
   scheduleHabitReminder,
@@ -54,19 +55,25 @@ export default function ProfileScreen({ navigation }) {
   const [notifEnabled, setNotifEnabled] = useState(false);
   const [reminderTime, setReminderTime] = useState('20:00');
   const [soundEnabled, setSoundEnabled] = useState(false);
+  const [emailNotifsEnabled, setEmailNotifsEnabled] = useState(true);
+  const [pushNotifsEnabled,  setPushNotifsEnabled]  = useState(true);
   const [copyText, setCopyText] = useState('Copy');
   const [savingReminder, setSavingReminder] = useState(false);
   const [avatarUri, setAvatarUri] = useState(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [habits, setHabits] = useState([]);
   const [comebackStatus, setComebackStatus] = useState({ active: false, daysIn: 0, best: 0 });
+  const [xpData, setXpData] = useState(null);
+  const [shieldData, setShieldData] = useState({ shieldCount: 0, shieldsUsedTotal: 0 });
 
   const fetchAll = useCallback(async () => {
     try {
-      const [profileRes, habitsRes, shareRes] = await Promise.all([
+      const [profileRes, habitsRes, shareRes, xpRes, shieldRes] = await Promise.all([
         api.get('/api/user/profile'),
         api.get('/api/habits'),
         api.get('/api/social/my-share').catch(() => ({ data: {} })),
+        api.get('/api/xp/profile').catch(() => ({ data: null })),
+        api.get('/api/shields/status').catch(() => ({ data: { shieldCount: 0, shieldsUsedTotal: 0 } })),
       ]);
 
       const p = profileRes.data || {};
@@ -74,6 +81,8 @@ export default function ProfileScreen({ navigation }) {
       setEditName(p.name || '');
       if (p.avatar) setAvatarUri(p.avatar);
       setShareData(shareRes.data || {});
+      if (xpRes.data) setXpData(xpRes.data);
+      if (shieldRes.data) setShieldData(shieldRes.data);
 
       const remSettings = await getReminderSettings();
       setNotifEnabled(remSettings.enabled);
@@ -98,6 +107,13 @@ export default function ProfileScreen({ navigation }) {
     try {
       const sound = await AsyncStorage.getItem('soundEnabled');
       setSoundEnabled(sound === 'true');
+    } catch (_) { }
+
+    // Load global notification prefs from DB
+    try {
+      const prefsRes = await api.get('/api/notifications/prefs');
+      setEmailNotifsEnabled(prefsRes.data.emailNotificationsEnabled ?? true);
+      setPushNotifsEnabled(prefsRes.data.pushNotificationsEnabled   ?? true);
     } catch (_) { }
   }, []);
 
@@ -169,6 +185,25 @@ export default function ProfileScreen({ navigation }) {
   const handleToggleSound = useCallback(async (val) => {
     setSoundEnabled(val);
     await AsyncStorage.setItem('soundEnabled', val ? 'true' : 'false');
+  }, []);
+
+  const handleToggleEmailNotifs = useCallback(async (val) => {
+    setEmailNotifsEnabled(val);
+    try {
+      await api.patch('/api/notifications/prefs', { emailNotificationsEnabled: val });
+    } catch (_) {
+      // Revert on failure
+      setEmailNotifsEnabled(!val);
+    }
+  }, []);
+
+  const handleTogglePushNotifs = useCallback(async (val) => {
+    setPushNotifsEnabled(val);
+    try {
+      await api.patch('/api/notifications/prefs', { pushNotificationsEnabled: val });
+    } catch (_) {
+      setPushNotifsEnabled(!val);
+    }
   }, []);
 
   const handleCopy = useCallback(async () => {
@@ -382,6 +417,32 @@ export default function ProfileScreen({ navigation }) {
             </View>
           )}
           <Text style={s.profileEmail}>{profile.email}</Text>
+
+          {/* ── Level badge + XP bar ── */}
+          {xpData && (() => {
+            const { current, next } = getLevelInfo(xpData.totalXp || 0);
+            const icon = getLevelIcon(current.level);
+            const pct  = Math.round((xpData.progress || 0) * 100);
+            return (
+              <View style={s.xpCard}>
+                {/* Level badge */}
+                <View style={s.levelBadgeRow}>
+                  <Text style={s.levelIcon}>{icon}</Text>
+                  <Text style={s.levelBadgeTxt}>Lv.{current.level}</Text>
+                  <Text style={s.levelName}>{current.name}</Text>
+                </View>
+                {/* XP bar */}
+                <View style={s.xpBarTrack}>
+                  <View style={[s.xpBarFill, { width: `${pct}%` }]} />
+                </View>
+                <Text style={s.xpBarLabel}>
+                  {next
+                    ? `${(xpData.totalXp || 0).toLocaleString()} / ${next.minXp.toLocaleString()} XP → Level ${next.level}`
+                    : `${(xpData.totalXp || 0).toLocaleString()} XP — Max Level!`}
+                </Text>
+              </View>
+            );
+          })()}
         </View>
 
         {/* Quick stats */}
@@ -390,6 +451,7 @@ export default function ProfileScreen({ navigation }) {
             ['🏃', stats.habits, 'Habits'],
             ['🔥', stats.bestStreak, 'Best Streak'],
             ['✅', stats.totalDone, 'Total Done'],
+            ['🛡', shieldData.shieldCount, 'Shields'],
           ].map(([icon, val, lbl], i, arr) => (
             <React.Fragment key={lbl}>
               <View style={s.statCell}>
@@ -556,6 +618,36 @@ export default function ProfileScreen({ navigation }) {
               </View>
             </>
           )}
+
+          {/* ── Email Notifications toggle ───────────────────────────── */}
+          <View style={s.divider} />
+          <View style={s.settingRow}>
+            <View style={s.settingLeft}>
+              <Text style={s.settingLabel}>✉️ Email Reminders</Text>
+              <Text style={s.settingDesc}>Daily email if you haven't logged today</Text>
+            </View>
+            <Switch
+              value={emailNotifsEnabled}
+              onValueChange={handleToggleEmailNotifs}
+              trackColor={{ false: colors.border, true: colors.primary }}
+              thumbColor={colors.textPrimary}
+            />
+          </View>
+
+          {/* ── Push Notifications toggle ─────────────────────────────── */}
+          <View style={s.divider} />
+          <View style={s.settingRow}>
+            <View style={s.settingLeft}>
+              <Text style={s.settingLabel}>🔔 Push Notifications</Text>
+              <Text style={s.settingDesc}>Evening nudge if streak is at risk</Text>
+            </View>
+            <Switch
+              value={pushNotifsEnabled}
+              onValueChange={handleTogglePushNotifs}
+              trackColor={{ false: colors.border, true: colors.primary }}
+              thumbColor={colors.textPrimary}
+            />
+          </View>
         </View>
 
         {/* Account */}
@@ -665,6 +757,15 @@ const makeStyles = (colors) => StyleSheet.create({
   editIcon: { padding: 4 },
   editIconTxt: { fontSize: 16 },
   profileEmail: { color: colors.textMuted, fontSize: 13, marginTop: 4 },
+  // ── XP card ──
+  xpCard: { marginTop: 14, backgroundColor: colors.primary + '11', borderWidth: 1, borderColor: colors.primary + '33', borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12, alignSelf: 'stretch', alignItems: 'flex-start' },
+  levelBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  levelIcon: { fontSize: 22 },
+  levelBadgeTxt: { fontSize: 16, fontWeight: '800', color: colors.primary },
+  levelName: { fontSize: 14, fontWeight: '600', color: colors.textSecondary },
+  xpBarTrack: { width: '100%', height: 7, backgroundColor: colors.border, borderRadius: 6, overflow: 'hidden', marginBottom: 6 },
+  xpBarFill: { height: 7, backgroundColor: colors.primary, borderRadius: 6 },
+  xpBarLabel: { fontSize: 11, color: colors.textMuted },
   editRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4, width: '100%' },
   nameInput: { flex: 1, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 12, height: 44, paddingHorizontal: 14, color: colors.textPrimary, fontSize: 16 },
   nameInputFocused: { borderColor: colors.primary },

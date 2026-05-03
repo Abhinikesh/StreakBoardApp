@@ -195,6 +195,12 @@ const LeaderboardRow = memo(function LeaderboardRow({
             >
               {entry.name || 'User'}
             </Text>
+            {/* Level badge */}
+            {entry.currentLevel > 0 && (
+              <View style={{ backgroundColor: '#7c3aed22', borderWidth: 1, borderColor: '#7c3aed44', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 }}>
+                <Text style={{ color: '#a78bfa', fontSize: 10, fontWeight: '700' }}>Lv.{entry.currentLevel}</Text>
+              </View>
+            )}
             {me && (
               <View style={{ backgroundColor: colors.primary, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 }}>
                 <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>You</Text>
@@ -588,24 +594,27 @@ export default function LeaderboardScreen({ navigation }) {
 
   const isMe = (entry) => entry?._id === myId || entry?.id === myId;
 
-  const listEntries = search.trim()
-    ? visibleSorted.filter((e) => (e.name || '').toLowerCase().includes(search.toLowerCase()))
-    : visibleSorted.slice(3);
+  const navigateToProfile = useCallback((user) => {
+    if (!user) return;
+    const id = user._id || user.id;
+    if (!id) {
+      console.warn('[LB] navigateToProfile: user has no id', user);
+      return;
+    }
+    try {
+      navigation.navigate('PublicProfile', {
+        shareCode:     user.shareCode   ?? null,
+        userName:      user.name        ?? 'User',
+        userId:        id,
+        currentStreak: user.currentStreak ?? 0,
+      });
+    } catch (err) {
+      console.warn('[LB] navigation.navigate failed', err);
+    }
+  }, [navigation]);
 
   // Podium uses top-3 of the visible set
   const podiumEntries = visibleSorted.slice(0, 3);
-
-  const navigateToProfile = (user) => {
-    if (!user) return;
-    navigation.navigate('PublicProfile', {
-      shareCode:     user.shareCode,
-      userName:      user.name,
-      userId:        user._id || user.id,
-      currentStreak: user.currentStreak ?? 0,
-    });
-  };
-
-  const TABS = [['streak', '🔥 Streak'], ['rate', '📈 Rate'], ['done', '✅ Done']];
 
   // Count for the filter pill labels
   const activeCount   = sorted.filter((e) => e.currentStreak > 0).length;
@@ -736,122 +745,25 @@ export default function LeaderboardScreen({ navigation }) {
               autoCorrect={false}
             />
 
-            {/* ── "All" mode: separator label before inactive section ── */}
-            {filter === 'all' && !search.trim() && inactiveCount > 0 && (() => {
-              // Check if the list contains any inactive entry after the top-3
-              const listHasInactive = listEntries.some(isInactive);
-              if (!listHasInactive) return null;
-              // Find where the first inactive entry starts in listEntries
-              const firstInactiveLocalIdx = listEntries.findIndex(isInactive);
-              return firstInactiveLocalIdx > 0 ? null : null; // separator rendered inline below
-            })()}
-
-            {/* ── List #4+ ── */}
-            {listEntries.length === 0 && search.trim() ? (
+            {/* ── Search no-match state ── */}
+            {listData.length === 0 && search.trim() ? (
               <View style={s.empty}>
+                <Text style={{ fontSize: 36, textAlign: 'center', marginBottom: 10 }}>🔍</Text>
                 <Text style={s.emptySub}>No users match "{search}"</Text>
               </View>
-            ) : (
-              (() => {
-                const rows = [];
-                let inactiveSepShown = false;
-
-                listEntries.forEach((entry, i) => {
-                  // In "All" mode, insert a divider before the first inactive entry
-                  if (
-                    filter === 'all' && !search.trim() &&
-                    !inactiveSepShown && isInactive(entry)
-                  ) {
-                    inactiveSepShown = true;
-                    rows.push(
-                      <View key="inactive-sep" style={s.inactiveSep}>
-                        <View style={s.inactiveSepLine} />
-                        <Text style={s.inactiveSepTxt}>Inactive users</Text>
-                        <View style={s.inactiveSepLine} />
-                      </View>
-                    );
-                  }
-
-                  const globalIdx = search.trim()
-                    ? visibleSorted.findIndex((e) => (e._id || e.id) === (entry._id || entry.id))
-                    : i + 3;
-                  const rank       = globalIdx + 1;
-                  const me         = isMe(entry);
-                  const inactive   = isInactive(entry);
-                  const accentColor = inactive
-                    ? colors.border
-                    : rank <= 7 ? colors.primary : colors.border;
-
-                  rows.push(
-                    <TouchableOpacity
-                      key={entry._id || entry.id || i}
-                      style={[
-                        s.listRow,
-                        me      && s.listRowMe,
-                        inactive && filter === 'all' && s.listRowInactive,
-                        { borderLeftColor: accentColor },
-                      ]}
-                      activeOpacity={0.8}
-                      onPress={() => navigateToProfile(entry)}
-                    >
-                      {/* Rank */}
-                      <Text style={[s.listRank, inactive && filter === 'all' && s.dimText]}>
-                        {globalIdx < 3 ? MEDAL[globalIdx] : `#${rank}`}
-                      </Text>
-
-                      {/* Avatar */}
-                      <View style={{ marginHorizontal: 10 }}>
-                        {renderAvatar(entry, 42, me ? colors.primary : null, inactive && filter === 'all')}
-                      </View>
-
-                      {/* Name + badges */}
-                      <View style={s.listNameCol}>
-                        <View style={s.listNameRow}>
-                          <Text
-                            style={[
-                              s.listName,
-                              me && { color: colors.primary },
-                              inactive && filter === 'all' && s.dimText,
-                            ]}
-                            numberOfLines={1}
-                          >
-                            {entry.name || 'User'}
-                          </Text>
-                          {me && (
-                            <View style={s.youBadge}>
-                              <Text style={s.youBadgeTxt}>You</Text>
-                            </View>
-                          )}
-                          {/* Inactive badge — only in "All" view */}
-                          {inactive && filter === 'all' && !me && (
-                            <View style={s.inactiveBadge}>
-                              <Text style={s.inactiveBadgeTxt}>Inactive</Text>
-                            </View>
-                          )}
-                        </View>
-                        {entry.email
-                          ? <Text style={[s.listEmail, inactive && filter === 'all' && s.dimText]} numberOfLines={1}>{entry.email}</Text>
-                          : null}
-                      </View>
-
-                      {/* Value — 🔄 comeback badge shown only for current user */}
-                      <View style={s.listValCol}>
-                        <Text style={[s.listValNum, { color: getValColor(entry) }]}>
-                          {getVal(entry)}
-                        </Text>
-                        {me && comebackStatus.active && (
-                          <Text style={s.comebackRowBadge}>
-                            🔄 Comeback
-                          </Text>
-                        )}
-                      </View>
-                    </TouchableOpacity>
-                  );
-                });
-
-                return rows;
-              })()
+              <FlatList
+                data={listData}
+                renderItem={renderListItem}
+                keyExtractor={keyExtractor}
+                scrollEnabled={false}
+                removeClippedSubviews={false}
+                initialNumToRender={15}
+                maxToRenderPerBatch={10}
+                windowSize={5}
+                ListEmptyComponent={null}
+              />
             )}
+
           </>
         )}
       </ScrollView>

@@ -22,9 +22,10 @@
       "package": "com.abhinikesh.streakboard",
       "versionCode": 2,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/icon.png",
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0d0d1a"
       },
+
       "edgeToEdgeEnabled": true,
       "intentFilters": [
         {
@@ -60,8 +61,7 @@
           "color": "#7c3aed",
           "defaultChannel": "default"
         }
-      ],
-      "expo-font"
+      ]
     ],
     "extra": {
       "eas": {

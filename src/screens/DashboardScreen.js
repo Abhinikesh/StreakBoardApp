@@ -19,11 +19,11 @@ import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import api from '../lib/axios';
-import { playTickSound, playCrossSound } from '../lib/sound';
+import { playTickSound, playCrossSound, playStreakMilestoneSound } from '../lib/sound';
 import { markUserActive } from '../lib/reengagement';
 import { triggerComebackIfEligible, markComebackLoggedToday } from '../lib/comeback';
 import { useTheme } from '../context/ThemeContext';
-
+import { getLevelInfo, getLevelIcon } from '../lib/xpLevels';
 
 
 // ─── Emoji / color pickers ────────────────────────────────────────────────────
@@ -150,7 +150,13 @@ export default function DashboardScreen({ navigation }) {
   const [soundEnabled,       setSoundEnabled]       = useState(true);
   const [userAvatar,         setUserAvatar]         = useState(null);
   const [showNoteSuccess,    setShowNoteSuccess]    = useState(false);
-  const [comebackBanner,     setComebackBanner]     = useState(null); // { title, body, best }
+  const [comebackBanner,     setComebackBanner]     = useState(null);
+  // XP / Level state
+  const [xpData,             setXpData]             = useState({ totalXp: 0, currentLevel: 1, levelName: 'Beginner', progress: 0, xpToNext: 200 });
+  const [showLevelUp,        setShowLevelUp]        = useState(false);
+  const [levelUpInfo,        setLevelUpInfo]        = useState({ level: 1, name: 'Beginner' });
+  const [shieldCount,        setShieldCount]        = useState(0);
+  const levelUpAnim = useRef(new Animated.Value(0)).current;
   const progressAnim  = useRef(new Animated.Value(0)).current;
   const bannerAnim    = useRef(new Animated.Value(0)).current;
   const bannerFireAnim = useRef(new Animated.Value(1)).current;
@@ -158,14 +164,18 @@ export default function DashboardScreen({ navigation }) {
   // ── Fetch all data ──────────────────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
     try {
-      const [habitsRes, profileRes] = await Promise.all([
+      const [habitsRes, profileRes, xpRes, shieldRes] = await Promise.all([
         api.get('/api/habits'),
         api.get('/api/user/profile'),
+        api.get('/api/xp/profile').catch(() => ({ data: null })),
+        api.get('/api/shields/status').catch(() => ({ data: { shieldCount: 0 } })),
       ]);
 
       const activeHabits = (habitsRes.data || []).filter((h) => h.isActive);
       setHabits(activeHabits);
       setProfile(profileRes.data || { name: '', email: '' });
+      if (xpRes.data) setXpData(xpRes.data);
+      if (shieldRes.data) setShieldCount(shieldRes.data.shieldCount || 0);
 
       // Fetch all logs in parallel
       const logResults = await Promise.all(
@@ -248,33 +258,31 @@ export default function DashboardScreen({ navigation }) {
       const entry    = habitLogs[habit._id] || { allLogs: [], todayLog: null };
       const todayLog = entry.todayLog;
 
-      // Pre-checks for comeback detection (captured BEFORE the API mutates state)
+      // Capture streak BEFORE the API call so we can detect an increase after.
+      const oldStreak = computeStreak(entry.allLogs);
+
       const wasFirstLogToday = !Object.values(habitLogs).some((l) => l.todayLog !== null);
       const wasAllZeroStreak = habits.every(
         (h) => computeStreak(habitLogs[h._id]?.allLogs || []) === 0
       );
 
       try {
+        let logResponse = null;
         if (todayLog) {
           if (todayLog.status === status) {
-            // Toggle off → DELETE
             await apiWithRetry(() => api.delete(`/api/logs/${todayLog._id}`));
           } else {
-            // Switch status → DELETE old + POST new
             await apiWithRetry(() => api.delete(`/api/logs/${todayLog._id}`));
-            await apiWithRetry(() => api.post('/api/logs', {
-              habitId: habit._id,
-              date:    todayStr(),
-              status,
+            const r = await apiWithRetry(() => api.post('/api/logs', {
+              habitId: habit._id, date: todayStr(), status,
             }));
+            logResponse = r?.data;
           }
         } else {
-          // No log yet → POST
-          await apiWithRetry(() => api.post('/api/logs', {
-            habitId: habit._id,
-            date:    todayStr(),
-            status,
+          const r = await apiWithRetry(() => api.post('/api/logs', {
+            habitId: habit._id, date: todayStr(), status,
           }));
+          logResponse = r?.data;
         }
         await refreshHabitLogs(habit._id);
         // Mark user active → cancels re-engagement notifications
@@ -306,9 +314,31 @@ export default function DashboardScreen({ navigation }) {
           markComebackLoggedToday().catch(() => {});
         }
 
-        // Play sound after successful log
+        // ── Sounds after successful log ───────────────────────────────────
         if (status === 'done')   playTickSound(soundEnabled).catch(() => {});
         if (status === 'missed') playCrossSound(soundEnabled).catch(() => {});
+
+        if (status === 'done' && !todayLog && oldStreak > 0) {
+          playStreakMilestoneSound(soundEnabled).catch(() => {});
+        }
+
+        // XP: update local xpData and trigger level-up modal if needed
+        if (logResponse?.xp) {
+          const xp = logResponse.xp;
+          if (xp.newTotalXp !== undefined) {
+            const { current, next, xpIntoLevel, xpNeeded, progress } = getLevelInfo(xp.newTotalXp);
+            setXpData({ totalXp: xp.newTotalXp, currentLevel: current.level, levelName: current.name,
+              progress, xpToNext: next ? next.minXp - xp.newTotalXp : 0 });
+          }
+          if (xp.leveledUp) {
+            setLevelUpInfo({ level: xp.newLevel, name: xp.newLevelName });
+            setShowLevelUp(true);
+            levelUpAnim.setValue(0);
+            Animated.timing(levelUpAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
+            playStreakMilestoneSound(soundEnabled).catch(() => {});
+            setTimeout(() => setShowLevelUp(false), 3000);
+          }
+        }
       } catch (err) {
         Alert.alert('Error', 'Failed to update log. Please try again.');
       }
@@ -438,10 +468,26 @@ export default function DashboardScreen({ navigation }) {
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
 
-      {/* ── Navbar — pinned outside ScrollView ── */}
+      {/* ── Navbar ── */}
       <View style={styles.navbar}>
         <Text style={styles.navbarBrand}>🔥 StreakBoard</Text>
-        <Text style={styles.navbarDate}>{shortDate()}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          {shieldCount > 0 && (
+            <View style={[styles.xpPill, { backgroundColor: '#0e7a4422', borderColor: '#22c55e55' }]}>
+              <Text style={[styles.xpPillText, { color: '#22c55e' }]}>🛡 ×{shieldCount}</Text>
+            </View>
+          )}
+          <TouchableOpacity
+            onPress={() => navigation.navigate('XpDetail', { xpData })}
+            activeOpacity={0.85}
+            style={styles.xpPill}
+          >
+            <Text style={styles.xpPillText}>
+              {getLevelIcon(xpData.currentLevel)} Lv.{xpData.currentLevel} · {(xpData.totalXp || 0).toLocaleString()} XP
+            </Text>
+          </TouchableOpacity>
+          <Text style={styles.navbarDate}>{shortDate()}</Text>
+        </View>
       </View>
 
       <ScrollView
@@ -961,6 +1007,33 @@ export default function DashboardScreen({ navigation }) {
           <Text style={{ color: 'white', fontWeight: '700', fontSize: 14 }}>✓ Note saved</Text>
         </View>
       )}
+
+      {/* ── Level-Up Modal overlay ── */}
+      <Modal visible={showLevelUp} transparent animationType="none" onRequestClose={() => setShowLevelUp(false)}>
+        <Animated.View style={[
+          { flex: 1, alignItems: 'center', justifyContent: 'center',
+            backgroundColor: 'rgba(0,0,0,0.82)' },
+          { opacity: levelUpAnim },
+        ]}>
+          <Animated.View style={[
+            { alignItems: 'center', paddingHorizontal: 40, paddingVertical: 48,
+              backgroundColor: '#1a1033', borderRadius: 28, borderWidth: 1,
+              borderColor: '#7c3aed88', width: '88%', shadowColor: '#7c3aed',
+              shadowOpacity: 0.6, shadowRadius: 32, elevation: 20 },
+            { transform: [{ scale: levelUpAnim.interpolate({ inputRange: [0, 1], outputRange: [0.75, 1] }) }] },
+          ]}>
+            <Text style={{ fontSize: 56, marginBottom: 8 }}>{getLevelIcon(levelUpInfo.level)}</Text>
+            <Text style={{ fontSize: 13, fontWeight: '700', color: '#a78bfa', letterSpacing: 3, marginBottom: 12 }}>LEVEL UP!</Text>
+            <Text style={{ fontSize: 30, fontWeight: '900', color: '#ffffff', textAlign: 'center', marginBottom: 6 }}>
+              Level {levelUpInfo.level}
+            </Text>
+            <Text style={{ fontSize: 18, fontWeight: '600', color: '#a78bfa', textAlign: 'center', marginBottom: 24 }}>
+              {levelUpInfo.name}
+            </Text>
+            <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Tap anywhere to dismiss</Text>
+          </Animated.View>
+        </Animated.View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1353,6 +1426,19 @@ const makeStyles = (colors) => StyleSheet.create({
   navbarDate: {
     color: colors.textMuted,
     fontSize: 11,
+  },
+  xpPill: {
+    backgroundColor: colors.primary + '22',
+    borderWidth: 1,
+    borderColor: colors.primary + '55',
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  xpPillText: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: '700',
   },
 
   // ── Suggestion chips ──

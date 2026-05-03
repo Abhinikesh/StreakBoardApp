@@ -3,103 +3,127 @@
  *
  * Habit-log sound effects using expo-av.
  *
- * WHY LOCAL ASSETS: The previous implementation fetched sounds from remote
- * URLs (mixkit.co). Any network delay or cold-start failure left tickSound /
- * crossSound as null, so playAsync was never called — sounds were silently
- * skipped.  Local WAV assets bundled with the app (assets/sounds/) load
- * instantly at startup, work fully offline, and never fail due to network.
+ * Sounds are bundled local WAV files (assets/sounds/) generated with
+ * multi-harmonic synthesis + exponential decay so they sound like chimes,
+ * not beeps. They load instantly at startup, work offline, and never fail
+ * due to network issues.
  *
- * Call preloadSounds() once in App.js useEffect (already wired up).
- * Call unloadSounds() in the cleanup return of that same useEffect.
+ * ── API ──────────────────────────────────────────────────────────────────────
+ *  preloadSounds()            — call once in App.js useEffect
+ *  unloadSounds()             — call in the same useEffect cleanup
+ *  playTickSound(enabled)     — habit marked DONE      (C5 → E5 chime)
+ *  playCrossSound(enabled)    — habit unchecked/missed (E4 → C4 soft drop)
+ *  playStreakMilestoneSound(enabled) — streak incremented (C5→E5→G5→C6 fanfare)
  */
 
 import { Audio } from 'expo-av';
 
 // ── Bundled local sound assets ─────────────────────────────────────────────────
-// Generated short WAV tones: tick = 880 Hz bright pop, cross = 300 Hz low click
-const TICK_ASSET  = require('../../assets/sounds/tick.wav');
-const CROSS_ASSET = require('../../assets/sounds/cross.wav');
+const TICK_ASSET    = require('../../assets/sounds/tick.mp3');
+const CROSS_ASSET   = require('../../assets/sounds/cross.mp3');
+const STREAK_ASSET  = require('../../assets/sounds/streak_increase.mp3');
 
-let tickSound  = null;
-let crossSound = null;
-let preloaded  = false;
+// Module-level sound object cache
+let tickSound    = null;
+let crossSound   = null;
+let streakSound  = null;
+let preloaded    = false;
 
-// ── Preload both sounds once at app startup ────────────────────────────────────
+// ── Audio mode ────────────────────────────────────────────────────────────────
+// playsInSilentModeIOS: false → respects the iOS hardware silent/mute switch.
+// staysActiveInBackground: false → releases audio session when app is backgrounded.
+const AUDIO_MODE = {
+  playsInSilentModeIOS:    false,
+  staysActiveInBackground: false,
+  shouldDuckAndroid:       true,   // lower other audio (music) briefly while playing
+};
+
+// ── Volume levels ─────────────────────────────────────────────────────────────
+const TICK_VOL    = 0.80;   // bright but not jarring
+const CROSS_VOL   = 0.65;   // softer — dismissive, not alarming
+const STREAK_VOL  = 0.85;   // celebratory — a touch louder
+
+// ── Preload ───────────────────────────────────────────────────────────────────
 /**
- * Call from App.js useEffect — loads both sounds into memory so playback
- * is instant when the user taps a habit button.
+ * Load all three sounds into memory so playback is zero-latency.
+ * Safe to call multiple times — idempotent.
  */
 export async function preloadSounds() {
-  if (preloaded) return; // idempotent — safe to call multiple times
+  if (preloaded) return;
   try {
-    // Allow playback even when the iOS silent switch is on
-    await Audio.setAudioModeAsync({
-      playsInSilentModeIOS:    true,
-      staysActiveInBackground: false,
-    });
+    await Audio.setAudioModeAsync(AUDIO_MODE);
 
-    // TICK — bright high-pitched pop (✓ Done)
-    const { sound: tick } = await Audio.Sound.createAsync(
-      TICK_ASSET,
-      { volume: 0.6, shouldPlay: false },
-    );
-    tickSound = tick;
+    const [t, c, s] = await Promise.all([
+      Audio.Sound.createAsync(TICK_ASSET,   { volume: TICK_VOL,   shouldPlay: false }),
+      Audio.Sound.createAsync(CROSS_ASSET,  { volume: CROSS_VOL,  shouldPlay: false }),
+      Audio.Sound.createAsync(STREAK_ASSET, { volume: STREAK_VOL, shouldPlay: false }),
+    ]);
 
-    // CROSS — low muted click (✗ Missed / unchecked)
-    const { sound: cross } = await Audio.Sound.createAsync(
-      CROSS_ASSET,
-      { volume: 0.4, shouldPlay: false },
-    );
-    crossSound = cross;
-
-    preloaded = true;
+    tickSound   = t.sound;
+    crossSound  = c.sound;
+    streakSound = s.sound;
+    preloaded   = true;
   } catch (e) {
-    // Non-fatal — app works perfectly without sounds
-    if (__DEV__) console.warn('Sound preload failed:', e);
+    // Non-fatal — app works without sounds
+    if (__DEV__) console.warn('[sound] preload failed:', e?.message ?? e);
   }
 }
 
-// ── Play the ✓ Done tick sound ─────────────────────────────────────────────────
+// ── Unload ────────────────────────────────────────────────────────────────────
 /**
- * @param {boolean} enabled  Pass the soundEnabled preference value.
- */
-export async function playTickSound(enabled = true) {
-  if (!enabled || !tickSound) return;
-  try {
-    await tickSound.setPositionAsync(0);
-    await tickSound.setVolumeAsync(0.6);
-    await tickSound.playAsync();
-  } catch (_) {
-    // Never block the UI for a sound failure
-  }
-}
-
-// ── Play the ✗ Missed / uncheck cross sound ───────────────────────────────────
-/**
- * @param {boolean} enabled  Pass the soundEnabled preference value.
- */
-export async function playCrossSound(enabled = true) {
-  if (!enabled || !crossSound) return;
-  try {
-    await crossSound.setPositionAsync(0);
-    await crossSound.setVolumeAsync(0.4);
-    await crossSound.playAsync();
-  } catch (_) {}
-}
-
-// ── Unload sounds to free memory ──────────────────────────────────────────────
-/**
- * Call in the cleanup return of the App.js useEffect that called preloadSounds.
+ * Free memory. Call in the App.js useEffect cleanup that called preloadSounds.
  */
 export async function unloadSounds() {
   preloaded = false;
   try {
-    if (tickSound)  { await tickSound.unloadAsync();  tickSound  = null; }
-    if (crossSound) { await crossSound.unloadAsync(); crossSound = null; }
+    await Promise.all([
+      tickSound?.unloadAsync(),
+      crossSound?.unloadAsync(),
+      streakSound?.unloadAsync(),
+    ]);
   } catch (_) {}
+  tickSound = crossSound = streakSound = null;
+}
+
+// ── Internal helper ───────────────────────────────────────────────────────────
+async function _play(soundObj, volume) {
+  if (!soundObj) return;
+  await soundObj.setPositionAsync(0);
+  await soundObj.setVolumeAsync(volume);
+  await soundObj.playAsync();
+}
+
+// ── Public play functions ─────────────────────────────────────────────────────
+
+/**
+ * Play the ✓ Done tick chime (C5 → E5).
+ * @param {boolean} enabled  Value of the "Sound Effects" setting.
+ */
+export async function playTickSound(enabled = true) {
+  if (!enabled) return;
+  try { await _play(tickSound, TICK_VOL); } catch (_) {}
+}
+
+/**
+ * Play the ✗ Uncheck/missed soft drop (E4 → C4).
+ * @param {boolean} enabled  Value of the "Sound Effects" setting.
+ */
+export async function playCrossSound(enabled = true) {
+  if (!enabled) return;
+  try { await _play(crossSound, CROSS_VOL); } catch (_) {}
+}
+
+/**
+ * Play the 🔥 Streak milestone fanfare (C5 → E5 → G5 → C6).
+ * Call when the user's streak for a habit has just incremented.
+ * @param {boolean} enabled  Value of the "Sound Effects" setting.
+ */
+export async function playStreakMilestoneSound(enabled = true) {
+  if (!enabled) return;
+  try { await _play(streakSound, STREAK_VOL); } catch (_) {}
 }
 
 // ── Legacy aliases ─────────────────────────────────────────────────────────────
-// Kept so any import using the old names doesn't break.
-export const playDoneSound   = () => playTickSound(true);
-export const playMissedSound = () => playCrossSound(true);
+// Keep old names so any import that still uses them doesn't break.
+export const playDoneSound   = (enabled) => playTickSound(enabled);
+export const playMissedSound = (enabled) => playCrossSound(enabled);
