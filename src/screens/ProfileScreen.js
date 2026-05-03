@@ -83,6 +83,8 @@ export default function ProfileScreen({ navigation }) {
       setShareData(shareRes.data || {});
       if (xpRes.data) setXpData(xpRes.data);
       if (shieldRes.data) setShieldData(shieldRes.data);
+      // seasonBadges live on the User doc, already fetched via /api/user/profile
+      // We read them directly from profile.seasonBadges in the render.
 
       const remSettings = await getReminderSettings();
       setNotifEnabled(remSettings.enabled);
@@ -463,6 +465,37 @@ export default function ProfileScreen({ navigation }) {
             </React.Fragment>
           ))}
         </View>
+
+        {/* ── Season Badges (up to 3 most recent) ── */}
+        {(() => {
+          const raw    = profile?.seasonBadges || [];
+          const recent = [...raw].slice(-3).reverse(); // newest first
+          if (!recent.length) return null;
+          const BADGE_META = {
+            champion:   { icon: '👑', label: 'Champion',    color: '#f59e0b' },
+            runner_up:  { icon: '🌟', label: 'Runner-up',   color: '#9ca3af' },
+            podium:     { icon: '🏅', label: 'Podium',      color: '#cd7c3a' },
+            top10:      { icon: '⚡',    label: 'Top 10',     color: '#7c3aed' },
+            participant:{ icon: '🎟️', label: 'Participant', color: '#0ea5e9' },
+          };
+          return (
+            <View style={[s.section, { paddingBottom: 4 }]}>
+              <Text style={s.sectionTitle}>SEASON BADGES</Text>
+              <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingBottom: 14, flexWrap: 'wrap' }}>
+                {recent.map((b, i) => {
+                  const meta = BADGE_META[b.type] || { icon: '🏆', label: b.type, color: '#7c3aed' };
+                  return (
+                    <View key={i} style={[s.seasonBadgeChip, { backgroundColor: meta.color + '18', borderColor: meta.color + '55' }]}>
+                      <Text style={{ fontSize: 22, marginBottom: 4 }}>{meta.icon}</Text>
+                      <Text style={[s.seasonBadgeLabel, { color: meta.color }]}>{meta.label}</Text>
+                      <Text style={[s.seasonBadgeSeason, { color: colors.textMuted }]}>{b.month}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          );
+        })()}
 
         {/* Comeback badge — shown for up to 3 days after returning */}
         {comebackStatus.active && (
@@ -869,4 +902,14 @@ const makeStyles = (colors) => StyleSheet.create({
     fontWeight: '700',
     flex: 1,
   },
+
+  // ── Season badge chips ──────────────────────────────────────────────────────
+  seasonBadgeChip: {
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderRadius: 14,
+    paddingVertical: 12, paddingHorizontal: 16,
+    minWidth: 90,
+  },
+  seasonBadgeLabel:  { fontSize: 11, fontWeight: '800', marginBottom: 2 },
+  seasonBadgeSeason: { fontSize: 10, fontWeight: '500' },
 });
