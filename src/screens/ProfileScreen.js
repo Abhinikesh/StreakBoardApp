@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, Image, ScrollView, TouchableOpacity, TextInput,
   StyleSheet, ActivityIndicator, StatusBar,
-  Alert, Switch, Share,
+  Alert, Switch, Share, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -10,7 +10,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api, { setAuthToken } from '../lib/axios';
-import { useTheme } from '../context/ThemeContext';
+import { useTheme, ACCENTS } from '../context/ThemeContext';
 import { getLevelInfo, getLevelIcon } from '../lib/xpLevels';
 import {
   requestNotificationPermission,
@@ -41,7 +41,7 @@ function computeBestStreak(logs) {
 }
 
 export default function ProfileScreen({ navigation }) {
-  const { colors, isDark, themeMode, setThemeMode, toggleTheme } = useTheme();
+  const { colors, isDark, themeMode, setThemeMode, toggleTheme, accentKey, setAccentKey } = useTheme();
   const s = makeStyles(colors);
 
   const [profile, setProfile] = useState({ name: '', email: '', createdAt: '', avatar: '' });
@@ -54,7 +54,8 @@ export default function ProfileScreen({ navigation }) {
   const [stats, setStats] = useState({ habits: 0, totalDone: 0, bestStreak: 0 });
   const [notifEnabled, setNotifEnabled] = useState(false);
   const [reminderTime, setReminderTime] = useState('20:00');
-  const [soundEnabled, setSoundEnabled] = useState(false);
+  const [soundEnabled,    setSoundEnabled]    = useState(false);
+  const [showThemePicker, setShowThemePicker] = useState(false);
   const [emailNotifsEnabled, setEmailNotifsEnabled] = useState(true);
   const [pushNotifsEnabled,  setPushNotifsEnabled]  = useState(true);
   const [copyText, setCopyText] = useState('Copy');
@@ -591,6 +592,23 @@ export default function ProfileScreen({ navigation }) {
             ))}
           </View>
 
+          {/* ── App Theme picker row ── */}
+          <View style={s.divider} />
+          <TouchableOpacity
+            style={s.settingRow}
+            onPress={() => setShowThemePicker(true)}
+            activeOpacity={0.75}
+          >
+            <View style={s.settingLeft}>
+              <Text style={s.settingLabel}>🖌️ App Theme</Text>
+              <Text style={s.settingDesc}>
+                {ACCENTS[accentKey]?.name || 'Default Purple'}
+              </Text>
+            </View>
+            {/* Colour dot preview */}
+            <View style={[s.accentDot, { backgroundColor: ACCENTS[accentKey]?.swatch }]} />
+          </TouchableOpacity>
+
           <View style={s.divider} />
           <View style={s.settingRow}>
             <View style={s.settingLeft}>
@@ -740,6 +758,55 @@ export default function ProfileScreen({ navigation }) {
         </View>
 
       </ScrollView>
+
+      {/* ── Theme Picker Modal ── */}
+      <Modal
+        visible={showThemePicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowThemePicker(false)}
+      >
+        <View style={s.sheetBackdrop}>
+          <View style={s.sheetPanel}>
+            <View style={s.sheetHeader}>
+              <Text style={s.sheetTitle}>🎨 App Theme</Text>
+              <TouchableOpacity onPress={() => setShowThemePicker(false)}>
+                <Text style={s.sheetClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={s.sheetSub}>Tap a swatch to apply instantly</Text>
+
+            <View style={s.swatchGrid}>
+              {Object.entries(ACCENTS).map(([key, acc]) => {
+                const active = accentKey === key;
+                return (
+                  <TouchableOpacity
+                    key={key}
+                    style={s.swatchItem}
+                    onPress={() => { setAccentKey(key); setShowThemePicker(false); }}
+                    activeOpacity={0.8}
+                  >
+                    <View style={[
+                      s.swatchCircle,
+                      { backgroundColor: acc.swatch },
+                      active && s.swatchCircleActive,
+                    ]}>
+                      {active && <Text style={s.swatchCheck}>✓</Text>}
+                    </View>
+                    <Text style={[
+                      s.swatchName,
+                      active && { color: colors.primary, fontWeight: '700' },
+                    ]} numberOfLines={2}>
+                      {acc.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -880,6 +947,52 @@ const makeStyles = (colors) => StyleSheet.create({
   },
   themeSegBtnTxtActive: {
     color: '#ffffff',
+  },
+
+  // ── Accent dot (preview in row) ───────────────────────────────────────────
+  accentDot: {
+    width: 24, height: 24, borderRadius: 12,
+    borderWidth: 2, borderColor: colors.border,
+  },
+
+  // ── Theme picker bottom sheet ─────────────────────────────────────────────
+  sheetBackdrop: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
+  },
+  sheetPanel: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    paddingHorizontal: 20, paddingTop: 20, paddingBottom: 36,
+  },
+  sheetHeader: {
+    flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'space-between', marginBottom: 6,
+  },
+  sheetTitle:  { color: colors.textPrimary, fontSize: 18, fontWeight: '800' },
+  sheetClose:  { color: colors.textMuted,   fontSize: 20, paddingHorizontal: 4 },
+  sheetSub:    { color: colors.textMuted,   fontSize: 13, marginBottom: 22 },
+
+  swatchGrid: {
+    flexDirection: 'row', flexWrap: 'wrap',
+    justifyContent: 'space-between', rowGap: 18,
+  },
+  swatchItem: { width: '30%', alignItems: 'center' },
+  swatchCircle: {
+    width: 56, height: 56, borderRadius: 28,
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: 8,
+    shadowColor: '#000', shadowOpacity: 0.18,
+    shadowRadius: 6, elevation: 4,
+  },
+  swatchCircleActive: {
+    borderWidth: 3, borderColor: '#fff',
+    shadowOpacity: 0.35, elevation: 8,
+  },
+  swatchCheck: { color: '#fff', fontSize: 22, fontWeight: '900' },
+  swatchName:  {
+    color: colors.textSecondary, fontSize: 11,
+    textAlign: 'center', fontWeight: '500',
   },
 
   // ── Comeback badge ────────────────────────────────────────────────────────
