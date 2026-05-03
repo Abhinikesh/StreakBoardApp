@@ -259,13 +259,22 @@ export default function FriendsScreen({ navigation }) {
 
       <View style={s.navbar}>
         <Text style={s.navBrand}>👥 Friends</Text>
-        <View style={s.tabSwitch}>
-          <TouchableOpacity style={[s.tabBtn, activeTab==='friends' && s.tabBtnActive]} onPress={() => setActiveTab('friends')}>
-            <Text style={[s.tabBtnTxt, activeTab==='friends' && s.tabBtnTxtActive]}>Friends</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <TouchableOpacity
+            style={s.msgNavBtn}
+            onPress={() => navigation.navigate('Messages')}
+            activeOpacity={0.8}
+          >
+            <Text style={s.msgNavTxt}>💬</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[s.tabBtn, activeTab==='challenges' && s.tabBtnActive]} onPress={() => { setActiveTab('challenges'); fetchChallenges(); }}>
-            <Text style={[s.tabBtnTxt, activeTab==='challenges' && s.tabBtnTxtActive]}>Challenges{challenges.filter(c=>c.status==='pending'&&c.challengedId?._id===undefined).length > 0 ? '' : ''}</Text>
-          </TouchableOpacity>
+          <View style={s.tabSwitch}>
+            <TouchableOpacity style={[s.tabBtn, activeTab==='friends' && s.tabBtnActive]} onPress={() => setActiveTab('friends')}>
+              <Text style={[s.tabBtnTxt, activeTab==='friends' && s.tabBtnTxtActive]}>Friends</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[s.tabBtn, activeTab==='challenges' && s.tabBtnActive]} onPress={() => { setActiveTab('challenges'); fetchChallenges(); }}>
+              <Text style={[s.tabBtnTxt, activeTab==='challenges' && s.tabBtnTxtActive]}>Challenges</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -392,11 +401,20 @@ export default function FriendsScreen({ navigation }) {
                 key={friend._id}
                 style={s.friendRow}
                 activeOpacity={0.8}
-                onPress={() => navigation.navigate('PublicProfile', {
-                  shareCode: friend.shareCode,
-                  userName: friend.name,
-                  userId: friend._id,
-                })}
+                onPress={() => Alert.alert(
+                  friend.name, '',
+                  [
+                    { text: '👤 View Profile', onPress: () => navigation.navigate('PublicProfile', {
+                        shareCode: friend.shareCode, userName: friend.name, userId: friend._id,
+                      })
+                    },
+                    { text: '💬 Send Message', onPress: () => navigation.navigate('Conversation', {
+                        friendId: friend._id, friendName: friend.name, friendAvatar: friend.avatar,
+                      })
+                    },
+                    { text: 'Cancel', style: 'cancel' },
+                  ]
+                )}
                 onLongPress={() => handleRemoveFriend(friend)}
               >
                 <AvatarCircle user={friend} size={44} />
@@ -592,6 +610,8 @@ const makeStyles = (colors) => StyleSheet.create({
   longPressHint: { color: colors.textMuted, fontSize: 11, textAlign: 'center', marginTop: 10 },
   challengeBtn:    { backgroundColor: colors.primary+'22', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginRight: 6 },
   challengeBtnTxt: { fontSize: 16 },
+  msgNavBtn:       { backgroundColor: colors.primary+'22', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
+  msgNavTxt:       { fontSize: 16 },
 
   emptyFriends: { alignItems: 'center', paddingVertical: 24 },
   emptyEmoji:   { fontSize: 40, marginBottom: 10 },

@@ -18,6 +18,8 @@ import PublicProfileScreen from '../screens/PublicProfileScreen';
 import XpDetailScreen      from '../screens/XpDetailScreen';
 import SeasonDetailScreen       from '../screens/SeasonDetailScreen';
 import WeeklyChallengeScreen    from '../screens/WeeklyChallengeScreen';
+import MessagesScreen           from '../screens/MessagesScreen';
+import ConversationScreen       from '../screens/ConversationScreen';
 import { useTheme, DARK } from '../context/ThemeContext';
 import SplashScreen from '../screens/SplashScreen';
 
@@ -153,6 +155,8 @@ function RootStack({ initialRoute }) {
       <Stack.Screen name="XpDetail"       component={XpDetailScreen} />
       <Stack.Screen name="SeasonDetail"      component={SeasonDetailScreen} />
       <Stack.Screen name="WeeklyChallenge"   component={WeeklyChallengeScreen} />
+      <Stack.Screen name="Messages"          component={MessagesScreen} />
+      <Stack.Screen name="Conversation"      component={ConversationScreen} />
     </Stack.Navigator>
   );
 }
