@@ -18,7 +18,8 @@ import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
-const CHANNEL_ID      = 'streakboard-daily-reminder';
+const CHANNEL_ID           = 'streakboard-daily-reminder';
+const GLOBAL_NOTIF_ID      = 'global-habit-reminder';
 const REMINDER_TIME_KEY    = 'reminderTime';
 const REMINDER_ENABLED_KEY = 'reminderEnabled';
 
@@ -78,8 +79,8 @@ export async function scheduleHabitReminder(timeStr) {
       return false;
     }
 
-    // Cancel any previously scheduled reminders first
-    await Notifications.cancelAllScheduledNotificationsAsync();
+    // Cancel only the global reminder (not per-habit ones)
+    await Notifications.cancelScheduledNotificationAsync(GLOBAL_NOTIF_ID).catch(() => {});
 
     // Ensure the Android channel is ready
     await ensureAndroidChannel();
@@ -90,6 +91,7 @@ export async function scheduleHabitReminder(timeStr) {
     // parseDailyTrigger, …) returns undefined and the library throws.
     // SchedulableTriggerInputTypes.DAILY = "daily" — fires every day at hour:minute.
     await Notifications.scheduleNotificationAsync({
+      identifier: GLOBAL_NOTIF_ID,
       content: {
         title: '🔥 StreakBoard',
         body:  "Don't forget to log your habits today!",
@@ -120,7 +122,7 @@ export async function scheduleHabitReminder(timeStr) {
 // ── Cancel the daily reminder ──────────────────────────────────────────────────
 export async function cancelHabitReminder() {
   try {
-    await Notifications.cancelAllScheduledNotificationsAsync();
+    await Notifications.cancelScheduledNotificationAsync(GLOBAL_NOTIF_ID).catch(() => {});
     await AsyncStorage.setItem(REMINDER_ENABLED_KEY, 'false');
     return true;
   } catch (e) {

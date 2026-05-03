@@ -25,7 +25,6 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0d0d1a"
       },
-
       "edgeToEdgeEnabled": true,
       "intentFilters": [
         {
@@ -61,7 +60,8 @@
           "color": "#7c3aed",
           "defaultChannel": "default"
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "extra": {
       "eas": {

@@ -33,6 +33,11 @@ import {
   getPendingQueue, addToPendingQueue,
   applyLocalLog,
 } from '../lib/offlineStore';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import {
+  scheduleHabitReminderNotif, cancelHabitReminderNotif,
+  rescheduleAllHabitReminders, ensureNotificationPermission,
+} from '../lib/habitReminders';
 
 
 // ─── Emoji / color pickers ────────────────────────────────────────────────────
@@ -174,6 +179,13 @@ export default function DashboardScreen({ navigation }) {
   // ── Offline context ─────────────────────────────────────────────────────────
   const { isOnline, refreshPendingCount } = useOffline();
 
+  // ── Per-habit reminder state ────────────────────────────────────────────────
+  const [reminderHabit,    setReminderHabit]    = useState(null);
+  const [reminderEnabled,  setReminderEnabled]  = useState(false);
+  const [reminderTime,     setReminderTime]     = useState(new Date());
+  const [showTimePicker,   setShowTimePicker]   = useState(false);
+  const [savingReminder,   setSavingReminder]   = useState(false);
+
   // ── Fetch all data (cache-first / stale-while-revalidate) ───────────────────
   const fetchAll = useCallback(async () => {
     // ── Step 1: load from cache instantly ──────────────────────────────────
@@ -231,6 +243,8 @@ export default function DashboardScreen({ navigation }) {
       }
       setHabitLogs(logsMap);
       await saveLogsToCache(logsMap);
+      // Reschedule per-habit reminders with fresh data
+      rescheduleAllHabitReminders(activeHabits).catch(() => {});
     } catch (err) {
       // If server fetch fails but we had cache, don't alert — just keep cached data
       if (!cachedHabits) {
@@ -424,7 +438,46 @@ export default function DashboardScreen({ navigation }) {
     [habitLogs, refreshHabitLogs, soundEnabled],
   );
 
-  // ── Create habit ────────────────────────────────────────────────────────────
+  // ── Per-habit reminder handlers ────────────────────────────────────────────
+  const handleOpenReminder = useCallback((habit) => {
+    const base = new Date();
+    if (habit.reminderTime) {
+      const [h, m] = habit.reminderTime.split(':').map(Number);
+      base.setHours(h, m, 0, 0);
+    } else {
+      base.setHours(20, 0, 0, 0);
+    }
+    setReminderHabit(habit);
+    setReminderEnabled(!!habit.reminderEnabled);
+    setReminderTime(base);
+    setShowTimePicker(false);
+  }, []);
+
+  const handleSaveReminder = useCallback(async () => {
+    if (!reminderHabit) return;
+    setSavingReminder(true);
+    const hh = String(reminderTime.getHours()).padStart(2, '0');
+    const mm = String(reminderTime.getMinutes()).padStart(2, '0');
+    const timeStr = `${hh}:${mm}`;
+    try {
+      await ensureNotificationPermission();
+      const res = await api.patch(`/api/habits/${reminderHabit._id}/reminder`, {
+        reminderEnabled,
+        reminderTime: reminderEnabled ? timeStr : null,
+      });
+      setHabits(prev => prev.map(h =>
+        h._id === reminderHabit._id ? { ...h, ...res.data } : h
+      ));
+      const updated = { ...reminderHabit, reminderEnabled, reminderTime: reminderEnabled ? timeStr : null };
+      if (reminderEnabled) await scheduleHabitReminderNotif(updated);
+      else                  await cancelHabitReminderNotif(reminderHabit._id);
+      setReminderHabit(null);
+    } catch (e) {
+      Alert.alert('Error', e.response?.data?.message || 'Could not save reminder.');
+    } finally { setSavingReminder(false); }
+  }, [reminderHabit, reminderEnabled, reminderTime]);
+
+  // ── Create habit ──────────────────────────────────────────────────────────
   const handleCreateHabit = useCallback(async () => {
     if (!newHabit.name.trim()) {
       Alert.alert('Required', 'Please enter a habit name.');
@@ -760,6 +813,9 @@ export default function DashboardScreen({ navigation }) {
                     <Text style={styles.habitName} numberOfLines={1}>
                       {habit.name}
                     </Text>
+                    {habit.reminderEnabled && (
+                      <Text style={styles.reminderBadge}>⏰</Text>
+                    )}
                   </View>
                   <View style={styles.habitStreakRow}>
                     {streak > 0 ? (
@@ -837,6 +893,15 @@ export default function DashboardScreen({ navigation }) {
                     }}
                   >
                     <Text style={styles.iconBtnText}>📝</Text>
+                  </TouchableOpacity>
+
+                  {/* Reminder */}
+                  <TouchableOpacity
+                    style={styles.iconBtn}
+                    activeOpacity={0.75}
+                    onPress={() => handleOpenReminder(habit)}
+                  >
+                    <Text style={styles.iconBtnText}>⏰</Text>
                   </TouchableOpacity>
 
                   {/* Calendar */}
@@ -1161,6 +1226,84 @@ export default function DashboardScreen({ navigation }) {
           </Animated.View>
         </Animated.View>
       </Modal>
+
+      {/* ── Per-habit Reminder Modal ── */}
+      <Modal
+        visible={!!reminderHabit}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setReminderHabit(null)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalSheet, { paddingBottom: 32 }]}>
+            {/* Header */}
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>⏰ Reminder</Text>
+              <TouchableOpacity onPress={() => setReminderHabit(null)}>
+                <Text style={styles.modalClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {reminderHabit && (
+              <Text style={{ color: colors.textMuted, fontSize: 13, marginBottom: 18, textAlign: 'center' }}>
+                {reminderHabit.icon} {reminderHabit.name}
+              </Text>
+            )}
+
+            {/* Toggle */}
+            <View style={styles.reminderRow}>
+              <Text style={styles.reminderLabel}>Enable reminder</Text>
+              <TouchableOpacity
+                style={[styles.reminderToggle, reminderEnabled && styles.reminderToggleOn]}
+                onPress={() => setReminderEnabled(v => !v)}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.reminderThumb, reminderEnabled && styles.reminderThumbOn]} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Time picker button */}
+            {reminderEnabled && (
+              <TouchableOpacity
+                style={styles.reminderTimePill}
+                onPress={() => setShowTimePicker(true)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.reminderTimeTxt}>
+                  {String(reminderTime.getHours()).padStart(2,'0')}:{String(reminderTime.getMinutes()).padStart(2,'0')}
+                </Text>
+                <Text style={{ color: colors.primary, fontSize: 12, marginTop: 2 }}>Tap to change</Text>
+              </TouchableOpacity>
+            )}
+
+            {showTimePicker && (
+              <DateTimePicker
+                value={reminderTime}
+                mode="time"
+                is24Hour={true}
+                display="default"
+                onChange={(_, date) => {
+                  setShowTimePicker(false);
+                  if (date) setReminderTime(date);
+                }}
+              />
+            )}
+
+            {/* Save button */}
+            <TouchableOpacity
+              style={[styles.saveReminderBtn, savingReminder && { opacity: 0.6 }]}
+              onPress={handleSaveReminder}
+              disabled={savingReminder}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.saveReminderTxt}>
+                {savingReminder ? 'Saving…' : 'Save Reminder'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -1750,6 +1893,35 @@ const makeStyles = (colors) => StyleSheet.create({
     fontSize: 16,
     textAlign: 'center',
   },
+  reminderBadge: {
+    fontSize: 12,
+    marginLeft: 4,
+    opacity: 0.85,
+  },
+  reminderRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 4, marginBottom: 20,
+  },
+  reminderLabel:  { color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
+  reminderToggle: {
+    width: 48, height: 26, borderRadius: 13, backgroundColor: colors.border,
+    justifyContent: 'center', padding: 2,
+  },
+  reminderToggleOn: { backgroundColor: colors.primary },
+  reminderThumb:  { width: 22, height: 22, borderRadius: 11, backgroundColor: '#fff' },
+  reminderThumbOn: { alignSelf: 'flex-end' },
+  reminderTimePill: {
+    alignSelf: 'center', alignItems: 'center',
+    backgroundColor: colors.primary + '18',
+    borderRadius: 14, borderWidth: 1, borderColor: colors.primary + '55',
+    paddingHorizontal: 28, paddingVertical: 14, marginBottom: 22,
+  },
+  reminderTimeTxt: { color: colors.primary, fontSize: 32, fontWeight: '800' },
+  saveReminderBtn: {
+    backgroundColor: colors.primary, borderRadius: 12,
+    paddingVertical: 14, alignItems: 'center', marginTop: 4,
+  },
+  saveReminderTxt: { color: '#fff', fontSize: 15, fontWeight: '700' },
 
   // ── Comeback banner ───────────────────────────────────────────────────────
   comebackBanner: {
