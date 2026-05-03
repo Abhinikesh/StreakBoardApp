@@ -852,23 +852,23 @@ export default function LeaderboardScreen({ navigation }) {
             />
 
             {/* ── Search no-match state ── */}
-            {listData.length === 0 && search.trim() ? (
+            {listData.length === 0 && search.trim() && (
               <View style={s.empty}>
                 <Text style={{ fontSize: 36, textAlign: 'center', marginBottom: 10 }}>🔍</Text>
                 <Text style={s.emptySub}>No users match "{search}"</Text>
               </View>
-              <FlatList
-                data={listData}
-                renderItem={renderListItem}
-                keyExtractor={keyExtractor}
-                scrollEnabled={false}
-                removeClippedSubviews={false}
-                initialNumToRender={15}
-                maxToRenderPerBatch={10}
-                windowSize={5}
-                ListEmptyComponent={null}
-              />
             )}
+            <FlatList
+              data={listData}
+              renderItem={renderListItem}
+              keyExtractor={keyExtractor}
+              scrollEnabled={false}
+              removeClippedSubviews={false}
+              initialNumToRender={15}
+              maxToRenderPerBatch={10}
+              windowSize={5}
+              ListEmptyComponent={null}
+            />
 
           </>
         )}
