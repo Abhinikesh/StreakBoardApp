@@ -275,10 +275,11 @@ function PodiumCard({ user, rankIdx, onPress, colors, entranceAnim, glowAnim, fi
   const isFirst    = rank === 1;
   const grad       = PODIUM_GRAD[rankIdx];
 
-  const cardStyle = {
+  // Guard: entranceAnim may be undefined if not passed by caller
+  const cardStyle = entranceAnim ? {
     opacity:   entranceAnim,
     transform: [{ translateY: entranceAnim.interpolate({ inputRange: [0, 1], outputRange: [80, 0] }) }],
-  };
+  } : {};
 
   // #1 crown bounce
   const crownStyle = isFirst && crownAnim ? {
@@ -419,6 +420,7 @@ export default function LeaderboardScreen({ navigation }) {
   }))).current;
 
   const fetchAll = useCallback(async () => {
+    setLoading(true);
     try {
       const [lbRes, meRes, seasonRes, seasonLbRes, myRankRes] = await Promise.all([
         api.get('/api/social/leaderboard'),
@@ -427,7 +429,7 @@ export default function LeaderboardScreen({ navigation }) {
         api.get('/api/seasons/leaderboard').catch(() => ({ data: [] })),
         api.get('/api/seasons/my-rank').catch(() => ({ data: null })),
       ]);
-      const raw = lbRes.data || [];
+      const raw = Array.isArray(lbRes.data) ? lbRes.data : [];
       const normalised = raw.map((e) => ({
         ...e,
         currentStreak:  Number(e.currentStreak  ?? e.longestStreak ?? e.streak ?? 0),
@@ -439,9 +441,16 @@ export default function LeaderboardScreen({ navigation }) {
       setEntries(normalised);
       setMyId(meRes.data?._id || meRes.data?.id || null);
       if (seasonRes.data)  setCurrentSeason(seasonRes.data);
-      setSeasonEntries(seasonLbRes.data || []);
+      setSeasonEntries(Array.isArray(seasonLbRes.data) ? seasonLbRes.data : []);
       if (myRankRes.data)  setMySeasonRank(myRankRes.data);
-    } catch (_) {}
+    } catch (err) {
+      console.error('[Leaderboard] fetchAll error:', err.message);
+      setEntries([]);
+      setSeasonEntries([]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
   // ── Snapshot + Most Improved: load old snap, save today's, compute winner ─
@@ -510,12 +519,8 @@ export default function LeaderboardScreen({ navigation }) {
 
   useFocusEffect(useCallback(() => { fetchAll(); }, [fetchAll]));
 
-  useEffect(() => {
-    (async () => { setLoading(true); await fetchAll(); setLoading(false); })();
-  }, [fetchAll]);
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true); await fetchAll(); setRefreshing(false);
+  const onRefresh = useCallback(() => {
+    setRefreshing(true); fetchAll();
   }, [fetchAll]);
 
   // ── Sort: active users always above inactive ones; within each group use tab metric ──
@@ -569,33 +574,40 @@ export default function LeaderboardScreen({ navigation }) {
   })();
 
   const renderListItem = useCallback(({ item }) => {
-    if (item.type === 'divider') {
+    try {
+      if (!item) return null;
+      if (item.type === 'divider') {
+        return (
+          <View style={s.inactiveSep}>
+            <View style={s.inactiveSepLine} />
+            <Text style={s.inactiveSepTxt}>— Currently Inactive —</Text>
+            <View style={s.inactiveSepLine} />
+          </View>
+        );
+      }
+      const entry = item.entry;
+      if (!entry) return null;
+      const id        = entry._id || entry.id;
+      const globalIdx = visibleSorted.findIndex((e) => (e._id || e.id) === id);
+      const rank      = globalIdx + 1;
       return (
-        <View style={s.inactiveSep}>
-          <View style={s.inactiveSepLine} />
-          <Text style={s.inactiveSepTxt}>— Currently Inactive —</Text>
-          <View style={s.inactiveSepLine} />
-        </View>
+        <LeaderboardRow
+          entry={entry}
+          rank={rank}
+          globalIdx={globalIdx}
+          me={isMe(entry)}
+          inactive={isInactive(entry)}
+          filter={filter}
+          tab={tab}
+          comebackActive={comebackStatus?.active ?? false}
+          colors={colors}
+          onPress={() => navigateToProfile(entry)}
+        />
       );
+    } catch (e) {
+      console.error('[renderListItem] error:', e.message);
+      return null;
     }
-    const entry     = item.entry;
-    const id        = entry._id || entry.id;
-    const globalIdx = visibleSorted.findIndex((e) => (e._id || e.id) === id);
-    const rank      = globalIdx + 1;
-    return (
-      <LeaderboardRow
-        entry={entry}
-        rank={rank}
-        globalIdx={globalIdx}
-        me={isMe(entry)}
-        inactive={isInactive(entry)}
-        filter={filter}
-        tab={tab}
-        comebackActive={comebackStatus.active}
-        colors={colors}
-        onPress={() => navigateToProfile(entry)}
-      />
-    );
   }, [visibleSorted, filter, tab, comebackStatus, colors, myId]);
 
   const keyExtractor = useCallback((item) =>
@@ -820,21 +832,28 @@ export default function LeaderboardScreen({ navigation }) {
             {/* ── Top-3 Podium (only shown with ≥ 3 visible users) ── */}
             {podiumEntries.length >= 3 && (
               <View style={s.podiumCard}>
-                {/* Order: 2nd, 1st, 3rd */}
+                {/* Order: 2nd, 1st, 3rd — pass animation refs so PodiumCard doesn't crash */}
                 <PodiumCard
                   user={podiumEntries[1]} rankIdx={1}
                   onPress={() => navigateToProfile(podiumEntries[1])}
                   colors={colors}
+                  entranceAnim={podiumEntr[0]}
                 />
                 <PodiumCard
                   user={podiumEntries[0]} rankIdx={0}
                   onPress={() => navigateToProfile(podiumEntries[0])}
                   colors={colors}
+                  entranceAnim={podiumEntr[1]}
+                  glowAnim={glowAnim}
+                  fireAnim={fireAnim}
+                  crownAnim={crownAnim}
+                  sparkleAnims={sparkles}
                 />
                 <PodiumCard
                   user={podiumEntries[2]} rankIdx={2}
                   onPress={() => navigateToProfile(podiumEntries[2])}
                   colors={colors}
+                  entranceAnim={podiumEntr[2]}
                 />
               </View>
             )}

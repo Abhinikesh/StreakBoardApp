@@ -65,6 +65,14 @@ function SafePublicProfile(props) {
   );
 }
 
+function SafeLeaderboard(props) {
+  return (
+    <ErrorBoundary>
+      <LeaderboardScreen {...props} />
+    </ErrorBoundary>
+  );
+}
+
 const Stack = createStackNavigator();
 const Tab   = createBottomTabNavigator();
 
@@ -73,7 +81,7 @@ const TABS = [
   { name: 'Calendar', label: 'Calendar',emoji: '📅', component: CalendarScreen },
   { name: 'Stats',    label: 'Stats',   emoji: '📊', component: StatsScreen },
   { name: 'Friends',  label: 'Friends', emoji: '👥', component: FriendsScreen },
-  { name: 'Ranks',    label: 'Leaderboard', emoji: '🏆', component: LeaderboardScreen },
+  { name: 'Ranks',    label: 'Leaderboard', emoji: '🏆', component: SafeLeaderboard },
   { name: 'Profile',  label: 'Profile', emoji: '👤', component: ProfileScreen },
 ];
 
