@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, Image,
-  StatusBar, Animated, Easing,
+  StatusBar, Animated, Easing, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
@@ -61,7 +61,16 @@ function Skel({ w = '100%', h = 18, r = 8, style }) {
 // ── Main component ────────────────────────────────────────────────────────────
 export default function PublicProfileScreen({ route, navigation }) {
   const { colors } = useTheme();
-  const { shareCode, userName, currentStreak: paramStreak } = route.params || {};
+
+  // Support params from both LeaderboardScreen (userId, username, currentStreak)
+  // and share-link deep links (shareCode, userName, currentStreak)
+  const params       = route?.params || {};
+  const shareCode    = params.shareCode    ?? null;
+  const userId       = params.userId       ?? null;
+  const userName     = params.username     ?? params.userName ?? 'StreakBoard User';
+  const paramStreak  = params.currentStreak ?? null;
+
+  console.log('[PublicProfile] received params:', JSON.stringify(params));
 
   const [profile,  setProfile]  = useState(null);
   const [loading,  setLoading]  = useState(true);
@@ -70,27 +79,73 @@ export default function PublicProfileScreen({ route, navigation }) {
   const [toast,    setToast]    = useState(false);
 
   const fetchProfile = useCallback(async () => {
-    if (!shareCode) { setError('No share code provided.'); setLoading(false); return; }
+    // Need either a shareCode or a userId to fetch
+    if (!shareCode && !userId) {
+      setError('No user identifier provided. Please go back and try again.');
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setReady(false);
+
     try {
-      const res = await api.get(`/api/social/u/${shareCode}`);
-      setProfile(res.data);
+      let data = null;
+
+      // Strategy 1: fetch by userId (the standard path from Leaderboard)
+      if (userId) {
+        try {
+          const res = await api.get(`/api/social/profile/${userId}`);
+          data = res.data;
+        } catch (e1) {
+          console.warn('[PublicProfile] /api/social/profile failed, status:', e1?.response?.status);
+          // 404 → truly not found; other errors → try shareCode fallback
+          if (e1?.response?.status === 404) {
+            throw new Error("This profile is private or doesn't exist.");
+          }
+          // fall through to Strategy 2
+        }
+      }
+
+      // Strategy 2: fetch by shareCode (deep-link / share path)
+      if (!data && shareCode) {
+        try {
+          const res = await api.get(`/api/social/u/${shareCode}`);
+          data = res.data;
+        } catch (e2) {
+          console.warn('[PublicProfile] /api/social/u failed, status:', e2?.response?.status);
+          if (e2?.response?.status === 404) {
+            throw new Error("This profile is private or doesn't exist.");
+          }
+          throw e2;
+        }
+      }
+
+      if (!data) throw new Error('No profile data returned from server.');
+
+      setProfile(data);
       setTimeout(() => setReady(true), 80);
     } catch (e) {
-      setError(e.response?.status === 404
-        ? "This profile is private or doesn't exist."
-        : 'Could not load profile. Check your connection.');
-    } finally { setLoading(false); }
-  }, [shareCode]);
+      console.error('[PublicProfile] fetch error:', e);
+      setError(
+        e.message || 'Could not load profile. Check your connection and try again.'
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [shareCode, userId]);
 
   useEffect(() => { fetchProfile(); }, [fetchProfile]);
 
-  // Derived stats
+  // Derived stats — always use optional chaining, never direct access
   const p  = profile || {};
   const st = p.stats || {};
   const currentStreak  = paramStreak ?? p.currentStreak ?? st.currentStreak ?? 0;
   const bestStreak     = st.longestStreak ?? st.bestStreak ?? p.bestStreak ?? p.longestStreak ?? 0;
   const totalDone      = st.totalDone ?? st.done ?? p.totalDone ?? 0;
   const completionRate = Math.round(st.overallRate ?? st.completionRate ?? p.completionRate ?? 0);
+  const habits         = Array.isArray(p.habits) ? p.habits : [];
 
   // Count-up values
   const cStreak = useCountUp(currentStreak,  ready);
@@ -110,13 +165,17 @@ export default function PublicProfileScreen({ route, navigation }) {
   }, [currentStreak]);
 
   const ringColor   = getRingColor(currentStreak);
-  const avatarBg    = getAvatarBg(p.name);
+  const avatarBg    = getAvatarBg(p.name || userName);
   const memberSince = p.createdAt
     ? new Date(p.createdAt).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
     : null;
+  const displayName = p.name || userName || 'StreakBoard User';
 
   const shareProfile = async () => {
-    await Clipboard.setStringAsync(`${WEB_BASE}/u/${shareCode}`);
+    const link = shareCode
+      ? `${WEB_BASE}/u/${shareCode}`
+      : `${WEB_BASE}/user/${userId}`;
+    await Clipboard.setStringAsync(link);
     setToast(true);
     setTimeout(() => setToast(false), 2600);
   };
@@ -124,8 +183,28 @@ export default function PublicProfileScreen({ route, navigation }) {
   const AvatarInner = () => p.avatar
     ? <Image source={{ uri: p.avatar }} style={{ width: 96, height: 96, borderRadius: 48 }} />
     : <View style={{ width: 96, height: 96, borderRadius: 48, backgroundColor: avatarBg, alignItems: 'center', justifyContent: 'center' }}>
-        <Text style={{ color: '#fff', fontSize: 38, fontWeight: '700' }}>{(p.name || '?')[0].toUpperCase()}</Text>
+        <Text style={{ color: '#fff', fontSize: 38, fontWeight: '700' }}>{(displayName[0] || '?').toUpperCase()}</Text>
       </View>;
+
+  // ── Loading screen ────────────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top']}>
+        <StatusBar barStyle="light-content" />
+        {/* Back button */}
+        <TouchableOpacity onPress={() => navigation.goBack()}
+          style={{ margin: 16, width: 40, height: 40, borderRadius: 20, backgroundColor: colors.card, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border }}>
+          <Text style={{ color: colors.primary, fontSize: 20, fontWeight: '700' }}>←</Text>
+        </TouchableOpacity>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={{ marginTop: 14, color: colors.textMuted, fontSize: 14 }}>
+            Loading {userName}'s profile…
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   // ── Error screen ──────────────────────────────────────────────────────────────
   if (error) {
@@ -172,9 +251,7 @@ export default function PublicProfileScreen({ route, navigation }) {
 
         {/* ── Avatar overlapping banner ── */}
         <View style={{ alignItems: 'center', marginTop: -52 }}>
-          {loading ? (
-            <Skel w={104} h={104} r={52} />
-          ) : currentStreak >= 30 ? (
+          {currentStreak >= 30 ? (
             <Animated.View style={{
               borderRadius: 56, borderWidth: 4, borderColor: '#F59E0B',
               shadowColor: '#F59E0B', shadowOpacity: 0.7, shadowRadius: 14, elevation: 12,
@@ -191,108 +268,76 @@ export default function PublicProfileScreen({ route, navigation }) {
 
           {/* Name / member since */}
           <View style={{ alignItems: 'center', marginTop: 12, paddingHorizontal: 24 }}>
-            {loading ? (
-              <>
-                <Skel w={150} h={24} r={8} style={{ marginBottom: 8 }} />
-                <Skel w={110} h={14} r={6} />
-              </>
-            ) : (
-              <>
-                <Text style={{ color: colors.textPrimary, fontSize: 22, fontWeight: '800', textAlign: 'center' }}>
-                  {p.name || userName || 'StreakBoard User'}
-                </Text>
-                {memberSince && (
-                  <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 4 }}>Member since {memberSince}</Text>
-                )}
-                {shareCode && (
-                  <View style={{ backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 5, marginTop: 10 }}>
-                    <Text style={{ color: colors.textMuted, fontSize: 12, fontWeight: '500' }}>#{shareCode}</Text>
-                  </View>
-                )}
-                {/* Level badge */}
-                {p.currentLevel && (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#7c3aed22', borderWidth: 1, borderColor: '#7c3aed44', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5, marginTop: 10, gap: 6 }}>
-                    <Text style={{ fontSize: 16 }}>{getLevelIcon(p.currentLevel)}</Text>
-                    <Text style={{ color: '#a78bfa', fontSize: 12, fontWeight: '700' }}>Lv.{p.currentLevel} {p.levelName}</Text>
-                  </View>
-                )}
-              </>
+            <Text style={{ color: colors.textPrimary, fontSize: 22, fontWeight: '800', textAlign: 'center' }}>
+              {displayName}
+            </Text>
+            {memberSince && (
+              <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 4 }}>Member since {memberSince}</Text>
+            )}
+            {shareCode && (
+              <View style={{ backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 5, marginTop: 10 }}>
+                <Text style={{ color: colors.textMuted, fontSize: 12, fontWeight: '500' }}>#{shareCode}</Text>
+              </View>
+            )}
+            {/* Level badge */}
+            {p.currentLevel > 0 && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#7c3aed22', borderWidth: 1, borderColor: '#7c3aed44', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5, marginTop: 10, gap: 6 }}>
+                <Text style={{ fontSize: 16 }}>{getLevelIcon(p.currentLevel)}</Text>
+                <Text style={{ color: '#a78bfa', fontSize: 12, fontWeight: '700' }}>Lv.{p.currentLevel} {p.levelName}</Text>
+              </View>
             )}
           </View>
         </View>
 
         {/* ── Stats cards ── */}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, marginTop: 22, gap: 10 }}>
-          {loading
-            ? [0,1,2,3].map((i) => (
-                <View key={i} style={{ width: '47%', backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 16, alignItems: 'center' }}>
-                  <Skel w={36} h={36} r={18} style={{ marginBottom: 10 }} />
-                  <Skel w={54} h={28} r={6} style={{ marginBottom: 8 }} />
-                  <Skel w={82} h={12} r={4} />
-                </View>
-              ))
-            : (
-              [
-                { icon: '🔥', label: 'Current Streak', val: cStreak, suf: ' days' },
-                { icon: '⭐', label: 'Best Streak',    val: cBest,   suf: ' days' },
-                { icon: '✅', label: 'Total Done',     val: cTotal,  suf: ''      },
-                { icon: '📊', label: 'Completion',     val: cRate,   suf: '%'     },
-              ].map((stat) => (
-                <View key={stat.label} style={{
-                  width: '47%', backgroundColor: colors.card, borderRadius: 16,
-                  borderWidth: 1, borderColor: colors.border, padding: 16, alignItems: 'center',
-                  shadowColor: colors.primary, shadowOpacity: 0.09, shadowRadius: 8, elevation: 3,
-                }}>
-                  <Text style={{ fontSize: 28, marginBottom: 6 }}>{stat.icon}</Text>
-                  <Text style={{ color: colors.primary, fontSize: 28, fontWeight: '900', letterSpacing: -0.5 }}>
-                    {stat.val}{stat.suf}
-                  </Text>
-                  <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 4, fontWeight: '600', textAlign: 'center' }}>
-                    {stat.label}
-                  </Text>
-                </View>
-              ))
-            )
-          }
+          {[
+            { icon: '🔥', label: 'Current Streak', val: cStreak, suf: ' days' },
+            { icon: '⭐', label: 'Best Streak',    val: cBest,   suf: ' days' },
+            { icon: '✅', label: 'Total Done',     val: cTotal,  suf: ''      },
+            { icon: '📊', label: 'Completion',     val: cRate,   suf: '%'     },
+          ].map((stat) => (
+            <View key={stat.label} style={{
+              width: '47%', backgroundColor: colors.card, borderRadius: 16,
+              borderWidth: 1, borderColor: colors.border, padding: 16, alignItems: 'center',
+              shadowColor: colors.primary, shadowOpacity: 0.09, shadowRadius: 8, elevation: 3,
+            }}>
+              <Text style={{ fontSize: 28, marginBottom: 6 }}>{stat.icon}</Text>
+              <Text style={{ color: colors.primary, fontSize: 28, fontWeight: '900', letterSpacing: -0.5 }}>
+                {stat.val}{stat.suf}
+              </Text>
+              <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 4, fontWeight: '600', textAlign: 'center' }}>
+                {stat.label}
+              </Text>
+            </View>
+          ))}
         </View>
 
         {/* ── Active habits ── */}
         <View style={{ marginHorizontal: 16, marginTop: 10 }}>
-          {loading ? (
-            <View style={{ backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 16 }}>
-              <Skel w={130} h={18} r={6} style={{ marginBottom: 16 }} />
-              {[0,1,2].map((i) => (
-                <View key={i} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
-                  <Skel w={38} h={38} r={10} style={{ marginRight: 12 }} />
-                  <View style={{ flex: 1 }}>
-                    <Skel w="65%" h={14} r={5} style={{ marginBottom: 8 }} />
-                    <Skel w="100%" h={6} r={3} />
-                  </View>
-                </View>
-              ))}
-            </View>
-          ) : Array.isArray(p.habits) && p.habits.length > 0 ? (
+          {habits.length > 0 ? (
             <View style={{ backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 16 }}>
               <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '700', marginBottom: 14 }}>
-                Active Habits ({p.habits.length})
+                Active Habits ({habits.length})
               </Text>
-              {p.habits.map((habit, i) => {
-                const rate = Math.min(Math.max(habit.completionRate ?? habit.weekRate ?? 0, 0), 100);
+              {habits.map((habit, i) => {
+                const rate = Math.min(Math.max(habit?.completionRate ?? habit?.weekRate ?? 0, 0), 100);
+                const habitName = habit?.name ?? 'Unnamed Habit';
                 return (
-                  <View key={habit._id || i} style={{ marginBottom: i < p.habits.length - 1 ? 16 : 0 }}>
+                  <View key={habit?._id || i} style={{ marginBottom: i < habits.length - 1 ? 16 : 0 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 7 }}>
                       <View style={{ width: 38, height: 38, borderRadius: 10, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
-                        <Text style={{ fontSize: 20 }}>{habit.icon || '🎯'}</Text>
+                        <Text style={{ fontSize: 20 }}>{habit?.icon || '🎯'}</Text>
                       </View>
                       <View style={{ flex: 1 }}>
                         <Text style={{ color: colors.textPrimary, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>
-                          {habit.name}
+                          {habitName}
                         </Text>
                         <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 1 }}>
-                          {habit.currentStreak != null ? `🔥 ${habit.currentStreak} day streak` : `${habit.trackingPeriod ?? 30}-day goal`}
+                          {habit?.currentStreak != null ? `🔥 ${habit.currentStreak} day streak` : `${habit?.trackingPeriod ?? 30}-day goal`}
                         </Text>
                       </View>
-                      {habit.todayStatus === 'done' && (
+                      {habit?.todayStatus === 'done' && (
                         <View style={{ backgroundColor: '#22C55E22', borderRadius: 10, paddingHorizontal: 9, paddingVertical: 4 }}>
                           <Text style={{ color: '#22C55E', fontSize: 13, fontWeight: '700' }}>✓</Text>
                         </View>
@@ -307,7 +352,7 @@ export default function PublicProfileScreen({ route, navigation }) {
                 );
               })}
             </View>
-          ) : !loading && (
+          ) : (
             <View style={{ backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 16 }}>
               <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '700', marginBottom: 6 }}>Habit Stats</Text>
               <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: 'center', paddingVertical: 10 }}>
@@ -318,7 +363,7 @@ export default function PublicProfileScreen({ route, navigation }) {
         </View>
 
         {/* ── Share button ── */}
-        {!loading && shareCode && (
+        {(shareCode || userId) && (
           <TouchableOpacity
             onPress={shareProfile}
             activeOpacity={0.78}
