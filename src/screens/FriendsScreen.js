@@ -214,19 +214,33 @@ export default function FriendsScreen({ navigation }) {
   }, []);
 
   const handleSendChallenge = useCallback(async () => {
-    if (!habitInput.trim()) { Alert.alert('', 'Enter a habit name.'); return; }
+    const habit = habitInput.trim();
+    if (!habit) { Alert.alert('', 'Enter a habit name.'); return; }
+    if (!selectedFriend?._id) {
+      Alert.alert('Error', 'No friend selected. Please close and try again.');
+      return;
+    }
     setSending(true);
     try {
-      await api.post('/api/friend-challenges', {
+      console.log('[FriendsScreen] sendChallenge payload:', {
         friendId: selectedFriend._id,
-        habitName: habitInput.trim(),
+        friendName: selectedFriend.name,
+        habitName: habit,
+      });
+      await api.post('/api/friend-challenges', {
+        friendId:  selectedFriend._id,
+        habitName: habit,
       });
       setShowCreateModal(false);
       setActiveTab('challenges');
       await fetchChallenges();
-      Alert.alert('Challenge Sent!', `${selectedFriend.name} has been challenged.`);
+      Alert.alert('Challenge Sent! ⚔️', `${selectedFriend.name} has been challenged.`);
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || 'Could not send challenge.');
+      console.error('[FriendsScreen] sendChallenge error:', e?.message, e?.response?.data);
+      // Show the real backend message (e.g. "already have an active challenge")
+      const errMsg = e?.response?.data?.message || e?.message || 'Could not send challenge.';
+      Alert.alert('Error', errMsg);
+      // Don't clear habitInput so the user can retry without retyping
     } finally { setSending(false); }
   }, [habitInput, selectedFriend, fetchChallenges]);
 

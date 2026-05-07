@@ -61,9 +61,10 @@ const BASE_DARK = {
   card:         '#111120',
   border:       '#1e1e2e',
   borderHover:  '#2a2a3a',
-  textPrimary:  '#ffffff',
-  textSecondary:'#888888',
-  textMuted:    '#555555',
+  textPrimary:  '#ffffff',    // contrast ~19:1 on bg ✅
+  textSecondary:'#D1D5DB',    // was #888888 (~4.2:1) → now ~12:1 ✅
+  textMuted:    '#9CA3AF',    // was #555555 (~2.4:1, invisible) → now ~7:1 ✅
+  textDisabled: '#4B5563',    // intentionally low — truly disabled state
   success:      '#10b981',
   danger:       '#ef4444',
 };

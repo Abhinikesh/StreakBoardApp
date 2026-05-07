@@ -1075,14 +1075,14 @@ export default function DashboardScreen({ navigation }) {
                     style={{
                       paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20,
                       backgroundColor: newHabit.trackingPeriod === days && !showCustomInput
-                        ? '#7C3AED' : 'transparent',
+                        ? colors.primary : 'transparent',
                       borderWidth: 1.5,
                       borderColor: newHabit.trackingPeriod === days && !showCustomInput
-                        ? '#7C3AED' : '#D1D5DB',
+                        ? colors.primary : colors.border,
                     }}
                   >
                     <Text style={{
-                      color: newHabit.trackingPeriod === days && !showCustomInput ? 'white' : '#6B7280',
+                      color: newHabit.trackingPeriod === days && !showCustomInput ? '#ffffff' : colors.textSecondary,
                       fontWeight: '600',
                     }}>{days} days</Text>
                   </TouchableOpacity>
@@ -1091,12 +1091,12 @@ export default function DashboardScreen({ navigation }) {
                   onPress={() => { setShowCustomInput(true); setNewHabit((p) => ({ ...p, trackingPeriod: 0 })); }}
                   style={{
                     paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20,
-                    backgroundColor: showCustomInput ? '#7C3AED' : 'transparent',
+                    backgroundColor: showCustomInput ? colors.primary : 'transparent',
                     borderWidth: 1.5,
-                    borderColor: showCustomInput ? '#7C3AED' : '#D1D5DB',
+                    borderColor: showCustomInput ? colors.primary : colors.border,
                   }}
                 >
-                  <Text style={{ color: showCustomInput ? 'white' : '#6B7280', fontWeight: '600' }}>Custom</Text>
+                  <Text style={{ color: showCustomInput ? '#ffffff' : colors.textSecondary, fontWeight: '600' }}>Custom</Text>
                 </TouchableOpacity>
               </View>
 
@@ -1105,7 +1105,7 @@ export default function DashboardScreen({ navigation }) {
                   <TextInput
                     keyboardType="number-pad"
                     placeholder="Enter days (e.g. 45)"
-                    placeholderTextColor="#9CA3AF"
+                    placeholderTextColor={colors.textMuted}
                     value={customDays}
                     onChangeText={(val) => {
                       setCustomDays(val);
@@ -1113,14 +1113,14 @@ export default function DashboardScreen({ navigation }) {
                       if (num > 0 && num <= 365) setNewHabit((p) => ({ ...p, trackingPeriod: num }));
                     }}
                     style={{
-                      flex: 1, borderWidth: 1.5, borderColor: '#7C3AED',
+                      flex: 1, borderWidth: 1.5, borderColor: colors.primary,
                       borderRadius: 12, padding: 12, fontSize: 15,
                       color: colors.textPrimary,
                       backgroundColor: colors.bg,
                     }}
                     maxLength={3}
                   />
-                  <Text style={{ color: '#6B7280', fontSize: 13 }}>days (max 365)</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 13 }}>days (max 365)</Text>
                 </View>
               )}
 

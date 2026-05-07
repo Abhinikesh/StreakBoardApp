@@ -33,8 +33,8 @@ const COLORS = {
   borderHover:   '#2a2a3a',
   primary:       '#7c3aed',
   textPrimary:   '#ffffff',
-  textSecondary: '#888888',
-  textMuted:     '#555555',
+  textSecondary: '#D1D5DB',   // was #888888 — too dim in dark mode
+  textMuted:     '#9CA3AF',   // was #555555 — nearly invisible in dark mode
   success:       '#10b981',
   danger:        '#ef4444',
 };
@@ -50,10 +50,15 @@ export default function LoginScreen({ navigation }) {
   const [step, setStep] = useState(1);
 
   // Form state
-  const [email,   setEmail]   = useState('');
-  const [otp,     setOtp]     = useState(EMPTY_OTP);
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState(null);
+  const [email,        setEmail]        = useState('');
+  const [otp,          setOtp]          = useState(EMPTY_OTP);
+  const [loading,      setLoading]      = useState(false);
+  const [error,        setError]        = useState(null);
+
+  // Resend cooldown (60 s)
+  const [resendTimer,  setResendTimer]  = useState(0);
+  const [canResend,    setCanResend]    = useState(false);
+  const resendIntervalRef = useRef(null);
 
   // Focus / border colours
   const [emailBorderColor, setEmailBorderColor] = useState(BORDER_DEFAULT);
@@ -126,6 +131,26 @@ export default function LoginScreen({ navigation }) {
     [otp],
   );
 
+  // Starts a 60-second countdown; when it hits 0, show the Resend button.
+  const startResendCooldown = useCallback(() => {
+    setCanResend(false);
+    setResendTimer(60);
+    clearInterval(resendIntervalRef.current);
+    resendIntervalRef.current = setInterval(() => {
+      setResendTimer(prev => {
+        if (prev <= 1) {
+          clearInterval(resendIntervalRef.current);
+          setCanResend(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, []);
+
+  // Cleanup interval on unmount
+  useEffect(() => () => clearInterval(resendIntervalRef.current), []);
+
   // ─── API calls ──────────────────────────────────────────────────────────────
   const handleSendOTP = useCallback(async () => {
     setLoading(true);
@@ -133,6 +158,7 @@ export default function LoginScreen({ navigation }) {
     try {
       await api.post('/api/auth/send-otp', { email });
       setStep(2);
+      startResendCooldown();
     } catch (err) {
       setError(
         err.response?.data?.message || 'Failed to send OTP. Please try again.',
@@ -140,7 +166,24 @@ export default function LoginScreen({ navigation }) {
     } finally {
       setLoading(false);
     }
-  }, [email]);
+  }, [email, startResendCooldown]);
+
+  const handleResendOTP = useCallback(async () => {
+    if (!canResend || loading) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await api.post('/api/auth/send-otp', { email });
+      setOtp(EMPTY_OTP);
+      startResendCooldown();
+    } catch (err) {
+      setError(
+        err.response?.data?.message || 'Failed to resend OTP. Please try again.',
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [canResend, loading, email, startResendCooldown]);
 
   const handleVerifyOTP = useCallback(async () => {
     const otpString = otp.join('');
@@ -365,10 +408,21 @@ export default function LoginScreen({ navigation }) {
                 )}
               </TouchableOpacity>
 
-              {/* 9. Back to email */}
+              {/* 9. Back to email + Resend */}
               <TouchableOpacity onPress={handleBackToEmail}>
                 <Text style={styles.backLink}>← Change email</Text>
               </TouchableOpacity>
+              <View style={styles.resendRow}>
+                {canResend ? (
+                  <TouchableOpacity onPress={handleResendOTP} disabled={loading}>
+                    <Text style={styles.resendActive}>Resend code</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <Text style={styles.resendTimer}>
+                    {resendTimer > 0 ? `Resend in ${resendTimer}s` : ''}
+                  </Text>
+                )}
+              </View>
             </>
           )}
 
@@ -564,5 +618,21 @@ const styles = StyleSheet.create({
     color: COLORS.danger,
     fontSize: 12,
     textAlign: 'center',
+  },
+
+  // Resend
+  resendRow: {
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  resendActive: {
+    color: COLORS.primary,
+    fontSize: 13,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
+  resendTimer: {
+    color: COLORS.textMuted,
+    fontSize: 12,
   },
 });
