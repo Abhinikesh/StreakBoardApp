@@ -75,7 +75,7 @@
               "targetCellWidth": 2,
               "targetCellHeight": 2,
               "updatePeriodMillis": 1800000,
-              "widgetFeatures": ["RECONFIGURABLE"]
+              "widgetFeatures": ["reconfigurable"]
             },
             {
               "name": "StreakMedium",
@@ -86,7 +86,7 @@
               "targetCellWidth": 4,
               "targetCellHeight": 2,
               "updatePeriodMillis": 1800000,
-              "widgetFeatures": ["RECONFIGURABLE"]
+              "widgetFeatures": ["reconfigurable"]
             }
           ]
         }
