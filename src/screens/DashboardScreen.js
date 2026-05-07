@@ -38,6 +38,9 @@ import {
   scheduleHabitReminderNotif, cancelHabitReminderNotif,
   rescheduleAllHabitReminders, ensureNotificationPermission,
 } from '../lib/habitReminders';
+import WeeklySummaryCard from '../components/WeeklySummaryCard';
+import DraggableFlatList, { ScaleDecorator, ShadowDecorator } from 'react-native-draggable-flatlist';
+import * as Haptics from 'expo-haptics';
 
 
 // ─── Emoji / color pickers ────────────────────────────────────────────────────
@@ -453,6 +456,18 @@ export default function DashboardScreen({ navigation }) {
     setShowTimePicker(false);
   }, []);
 
+  // ── Drag-to-reorder ────────────────────────────────────────────────────
+  const handleReorder = useCallback(async ({ data }) => {
+    // 1. Optimistic update
+    setHabits(data);
+    // 2. Drop haptic
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    // 3. Persist (fire-and-forget — don't block UI)
+    api.patch('/api/habits/reorder', {
+      order: data.map((h, i) => ({ id: h._id, sortOrder: i })),
+    }).catch(err => console.warn('[reorder] save failed:', err.message));
+  }, []);
+
   const handleSaveReminder = useCallback(async () => {
     if (!reminderHabit) return;
     setSavingReminder(true);
@@ -710,6 +725,9 @@ export default function DashboardScreen({ navigation }) {
           </Animated.View>
         )}
 
+        {/* ── Weekly summary card (Sunday/Monday only, dismissable) ── */}
+        <WeeklySummaryCard colors={colors} />
+
         {/* ── Progress bar ── */}
         {habits.length > 0 && (
           <View style={styles.progressSection}>
@@ -789,133 +807,99 @@ export default function DashboardScreen({ navigation }) {
             </TouchableOpacity>
           </View>
         ) : (
-          habits.map((habit) => {
-            const entry    = habitLogs[habit._id] || { allLogs: [], todayLog: null };
-            const todayLog = entry.todayLog;
-            const streak   = computeStreak(entry.allLogs);
-            const isDone   = todayLog?.status === 'done';
-            const isMissed = todayLog?.status === 'missed';
-
-            return (
-              <View key={habit._id} style={styles.habitCard}>
-                {/* Color accent bar */}
-                <View
-                  style={[
-                    styles.accentBar,
-                    { backgroundColor: habit.colorHex || colors.primary },
-                  ]}
-                />
-
-                {/* Middle content */}
-                <View style={styles.habitMiddle}>
-                  <View style={styles.habitNameRow}>
-                    <Text style={styles.habitIcon}>{habit.icon}</Text>
-                    <Text style={styles.habitName} numberOfLines={1}>
-                      {habit.name}
-                    </Text>
-                    {habit.reminderEnabled && (
-                      <Text style={styles.reminderBadge}>⏰</Text>
-                    )}
-                  </View>
-                  <View style={styles.habitStreakRow}>
-                    {streak > 0 ? (
-                      <>
-                        <Text style={styles.streakFire}>🔥</Text>
-                        <Text style={styles.streakText}>
-                          {streak} day streak
-                        </Text>
-                      </>
-                    ) : (
-                      <Text style={styles.streakZero}>
-                        Start your streak today
-                      </Text>
-                    )}
-                  </View>
-                </View>
-
-                {/* Action buttons */}
-                <View style={styles.habitActions}>
-                  {/* Done */}
-                  <TouchableOpacity
-                    style={[
-                      styles.actionBtn,
-                      isDone && styles.actionBtnDone,
-                    ]}
-                    activeOpacity={0.75}
-                    onPress={() => handleLogAction(habit, 'done')}
-                  >
-                    <Text
-                      style={[
-                        styles.actionBtnText,
-                        isDone && styles.actionBtnTextActive,
-                      ]}
-                    >
-                      ✓
-                    </Text>
-                  </TouchableOpacity>
-
-                  {/* Missed */}
-                  <TouchableOpacity
-                    style={[
-                      styles.actionBtn,
-                      isMissed && styles.actionBtnMissed,
-                    ]}
-                    activeOpacity={0.75}
-                    onPress={() => handleLogAction(habit, 'missed')}
-                  >
-                    <Text
-                      style={[
-                        styles.actionBtnText,
-                        isMissed && styles.actionBtnTextActive,
-                      ]}
-                    >
-                      ✗
-                    </Text>
-                  </TouchableOpacity>
-
-                  {/* Note */}
-                  <TouchableOpacity
-                    style={styles.iconBtn}
-                    activeOpacity={0.75}
-                    onPress={async () => {
-                      const todayLog = habitLogs[habit._id]?.todayLog;
-                      // Load note: prefer today's log note, fall back to AsyncStorage
-                      let savedNote = todayLog?.note || '';
-                      if (!savedNote) {
-                        try {
-                          const local = await AsyncStorage.getItem(`note_${habit._id}_${todayStr()}`);
-                          if (local) savedNote = local;
-                        } catch (_) {}
-                      }
-                      setNoteText(savedNote);
-                      setNoteModalHabit(habit);
-                      setShowNoteModal(true);
-                    }}
-                  >
-                    <Text style={styles.iconBtnText}>📝</Text>
-                  </TouchableOpacity>
-
-                  {/* Reminder */}
-                  <TouchableOpacity
-                    style={styles.iconBtn}
-                    activeOpacity={0.75}
-                    onPress={() => handleOpenReminder(habit)}
-                  >
-                    <Text style={styles.iconBtnText}>⏰</Text>
-                  </TouchableOpacity>
-
-                  {/* Calendar */}
-                  <TouchableOpacity
-                    style={styles.iconBtn}
-                    activeOpacity={0.75}
-                    onPress={() => navigation.navigate('Calendar', { habitId: habit._id })}
-                  >
-                    <Text style={styles.iconBtnText}>📅</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            );
-          })
+          <DraggableFlatList
+            data={habits}
+            keyExtractor={(h) => h._id}
+            onDragBegin={() =>
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
+            }
+            onDragEnd={handleReorder}
+            scrollEnabled={false}
+            renderItem={({ item: habit, drag, isActive }) => {
+              const entry    = habitLogs[habit._id] || { allLogs: [], todayLog: null };
+              const todayLog = entry.todayLog;
+              const streak   = computeStreak(entry.allLogs);
+              const isDone   = todayLog?.status === 'done';
+              const isMissed = todayLog?.status === 'missed';
+              return (
+                <ScaleDecorator activeScale={1.02}>
+                  <ShadowDecorator>
+                    <View style={[styles.habitCard, isActive && styles.habitCardDragging]}>
+                      <View style={[styles.accentBar, { backgroundColor: habit.colorHex || colors.primary }]} />
+                      <View style={styles.habitMiddle}>
+                        <View style={styles.habitNameRow}>
+                          <Text style={styles.habitIcon}>{habit.icon}</Text>
+                          <Text style={styles.habitName} numberOfLines={1}>{habit.name}</Text>
+                          {habit.reminderEnabled && <Text style={styles.reminderBadge}>⏰</Text>}
+                        </View>
+                        <View style={styles.habitStreakRow}>
+                          {streak > 0 ? (
+                            <>
+                              <Text style={styles.streakFire}>🔥</Text>
+                              <Text style={styles.streakText}>{streak} day streak</Text>
+                            </>
+                          ) : (
+                            <Text style={styles.streakZero}>Start your streak today</Text>
+                          )}
+                        </View>
+                      </View>
+                      <View style={styles.habitActions}>
+                        <TouchableOpacity
+                          style={[styles.actionBtn, isDone && styles.actionBtnDone]}
+                          activeOpacity={0.75}
+                          onPress={() => handleLogAction(habit, 'done')}
+                        >
+                          <Text style={[styles.actionBtnText, isDone && styles.actionBtnTextActive]}>✓</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.actionBtn, isMissed && styles.actionBtnMissed]}
+                          activeOpacity={0.75}
+                          onPress={() => handleLogAction(habit, 'missed')}
+                        >
+                          <Text style={[styles.actionBtnText, isMissed && styles.actionBtnTextActive]}>✗</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.iconBtn}
+                          activeOpacity={0.75}
+                          onPress={async () => {
+                            let savedNote = todayLog?.note || '';
+                            if (!savedNote) {
+                              try {
+                                const local = await AsyncStorage.getItem(`note_${habit._id}_${todayStr()}`);
+                                if (local) savedNote = local;
+                              } catch (_) {}
+                            }
+                            setNoteText(savedNote);
+                            setNoteModalHabit(habit);
+                            setShowNoteModal(true);
+                          }}
+                        >
+                          <Text style={styles.iconBtnText}>📝</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.iconBtn} activeOpacity={0.75} onPress={() => handleOpenReminder(habit)}>
+                          <Text style={styles.iconBtnText}>⏰</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.iconBtn} activeOpacity={0.75} onPress={() => navigation.navigate('Calendar', { habitId: habit._id })}>
+                          <Text style={styles.iconBtnText}>📅</Text>
+                        </TouchableOpacity>
+                        {/* Drag handle — hidden when only 1 habit */}
+                        {habits.length > 1 && (
+                          <TouchableOpacity
+                            onLongPress={drag}
+                            delayLongPress={100}
+                            style={styles.dragHandle}
+                            hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+                          >
+                            <Text style={styles.dragHandleIcon}>≡</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                  </ShadowDecorator>
+                </ScaleDecorator>
+              );
+            }}
+          />
         )}
 
         {/* ── Weekly Challenge Card ── */}
@@ -1458,6 +1442,22 @@ const makeStyles = (colors) => StyleSheet.create({
     gap: 8,
     paddingRight: 14,
     paddingVertical: 16,
+  },
+  habitCardDragging: {
+    opacity: 0.95,
+    borderColor: colors.primary + '66',
+  },
+  dragHandle: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+    marginLeft: 2,
+  },
+  dragHandleIcon: {
+    fontSize: 20,
+    color: colors.textMuted,
+    letterSpacing: 1,
   },
   actionBtn: {
     width: 44,
