@@ -360,6 +360,9 @@ export default function ProfileScreen({ navigation }) {
       <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled">
 
+        {/* ── Banner color strip ── */}
+        <View style={[s.profileBanner, { backgroundColor: profile.bannerColor || '#7C3AED' }]} />
+
         {/* Avatar + name */}
         <View style={s.avatarSection}>
           {/* Tappable avatar — shows photo or initial */}
@@ -420,6 +423,30 @@ export default function ProfileScreen({ navigation }) {
             </View>
           )}
           <Text style={s.profileEmail}>{profile.email}</Text>
+
+          {/* Bio */}
+          {!!profile.bio && (
+            <Text style={s.profileBio}>{profile.bio}</Text>
+          )}
+
+          {/* Pinned badge */}
+          {profile.pinnedBadge?.icon ? (
+            <View style={s.pinnedBadge}>
+              <Text style={s.pinnedBadgeIcon}>{profile.pinnedBadge.icon}</Text>
+              <Text style={[s.pinnedBadgeTxt, { color: colors.primary }]}>
+                {profile.pinnedBadge.label}
+              </Text>
+            </View>
+          ) : null}
+
+          {/* Edit Profile button */}
+          <TouchableOpacity
+            style={[s.editProfileBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+            onPress={() => navigation.navigate('EditProfile')}
+            activeOpacity={0.85}
+          >
+            <Text style={[s.editProfileBtnTxt, { color: colors.primary }]}>✏️  Edit Profile</Text>
+          </TouchableOpacity>
 
           {/* ── Level badge + XP bar ── */}
           {xpData && (() => {
@@ -950,6 +977,52 @@ const makeStyles = (colors) => StyleSheet.create({
   },
 
   // ── Accent dot (preview in row) ───────────────────────────────────────────
+  accentBar: {
+    width: 4,
+    alignSelf: 'stretch',
+    borderRadius: 2,
+    marginRight: 14,
+  },
+  // ── Profile banner ──
+  profileBanner: {
+    height: 76,
+    marginHorizontal: -20,
+    marginTop: -16,
+    marginBottom: -38,
+    borderRadius: 0,
+  },
+  profileBio: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+    marginTop: 6,
+    paddingHorizontal: 24,
+  },
+  pinnedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    marginTop: 10,
+    gap: 6,
+  },
+  pinnedBadgeIcon: { fontSize: 16 },
+  pinnedBadgeTxt:  { fontSize: 12, fontWeight: '700' },
+  editProfileBtn: {
+    borderWidth: 1.5,
+    borderRadius: 20,
+    paddingHorizontal: 22,
+    paddingVertical: 8,
+    marginTop: 14,
+    borderColor: colors.border,
+  },
+  editProfileBtnTxt: { fontSize: 13, fontWeight: '600' },
+
   accentDot: {
     width: 24, height: 24, borderRadius: 12,
     borderWidth: 2, borderColor: colors.border,

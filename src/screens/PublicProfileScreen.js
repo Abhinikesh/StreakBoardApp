@@ -256,7 +256,7 @@ export default function PublicProfileScreen({ route, navigation }) {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 80 }}>
 
         {/* ── Gradient banner (purple→blue simulation) ── */}
-        <View style={{ height: 148, backgroundColor: '#3b0764', overflow: 'hidden' }}>
+        <View style={{ height: 148, backgroundColor: p.bannerColor || '#3b0764', overflow: 'hidden' }}>
           <View style={{ position: 'absolute', right: 0, top: 0, width: '55%', height: '100%', backgroundColor: 'rgba(59,130,246,0.38)' }} />
           <View style={{ position: 'absolute', top: -40, right: -30, width: 140, height: 140, borderRadius: 70, backgroundColor: 'rgba(139,92,246,0.3)' }} />
           <View style={{ position: 'absolute', bottom: -25, left: -25, width: 110, height: 110, borderRadius: 55, backgroundColor: 'rgba(59,130,246,0.22)' }} />
@@ -306,6 +306,21 @@ export default function PublicProfileScreen({ route, navigation }) {
                 <Text style={{ color: '#a78bfa', fontSize: 12, fontWeight: '700' }}>Lv.{p.currentLevel} {p.levelName}</Text>
               </View>
             )}
+
+            {/* Bio */}
+            {!!p.bio && (
+              <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18, textAlign: 'center', marginTop: 10, paddingHorizontal: 24 }}>
+                {p.bio}
+              </Text>
+            )}
+
+            {/* Pinned badge */}
+            {p.pinnedBadge?.icon ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 6, marginTop: 10, gap: 6 }}>
+                <Text style={{ fontSize: 16 }}>{p.pinnedBadge.icon}</Text>
+                <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>{p.pinnedBadge.label}</Text>
+              </View>
+            ) : null}
           </View>
         </View>
 

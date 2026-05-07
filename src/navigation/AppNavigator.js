@@ -22,6 +22,7 @@ import MessagesScreen           from '../screens/MessagesScreen';
 import ConversationScreen       from '../screens/ConversationScreen';
 import { useTheme, DARK } from '../context/ThemeContext';
 import SplashScreen from '../screens/SplashScreen';
+import EditProfileScreen from '../screens/EditProfileScreen';
 
 // ── Error Boundary: catches render errors in PublicProfileScreen ─────────────
 class ErrorBoundary extends Component {
@@ -157,6 +158,7 @@ function RootStack({ initialRoute }) {
       <Stack.Screen name="WeeklyChallenge"   component={WeeklyChallengeScreen} />
       <Stack.Screen name="Messages"          component={MessagesScreen} />
       <Stack.Screen name="Conversation"      component={ConversationScreen} />
+      <Stack.Screen name="EditProfile"       component={EditProfileScreen} />
     </Stack.Navigator>
   );
 }
