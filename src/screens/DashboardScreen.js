@@ -28,7 +28,7 @@ import { useOffline } from '../context/OfflineContext';
 import { OfflineBanner, SyncToast } from '../components/OfflineUI';
 import {
   getCachedHabits, saveHabitsToCache,
-  getCachedLogs,   saveLogsToCache,
+  getCachedLogs, saveLogsToCache,
   getCachedProfile, saveProfileToCache,
   getPendingQueue, addToPendingQueue,
   applyLocalLog,
@@ -41,42 +41,44 @@ import {
 import WeeklySummaryCard from '../components/WeeklySummaryCard';
 import DraggableFlatList, { ScaleDecorator, ShadowDecorator } from 'react-native-draggable-flatlist';
 import * as Haptics from 'expo-haptics';
+import { writeWidgetData } from '../lib/widgetData';
+import WidgetTipCard from '../components/WidgetTipCard';
 
 
 // ─── Emoji / color pickers ────────────────────────────────────────────────────
 const EMOJI_OPTIONS = [
-  '💧','🏃','📚','🧘','💪','🥗',
-  '😴','☀️','✍️','🎯','🎨','🚫',
+  '💧', '🏃', '📚', '🧘', '💪', '🥗',
+  '😴', '☀️', '✍️', '🎯', '🎨', '🚫',
 ];
 const COLOR_OPTIONS = [
-  '#10b981','#7c3aed','#ef4444','#f59e0b',
-  '#3b82f6','#ec4899','#14b8a6','#f97316',
+  '#10b981', '#7c3aed', '#ef4444', '#f59e0b',
+  '#3b82f6', '#ec4899', '#14b8a6', '#f97316',
 ];
 const PERIOD_OPTIONS = [30, 60, 90];
 
 const HABIT_SUGGESTIONS = [
-  { name: 'DSA Practice',    icon: '💻' },
-  { name: 'Morning Run',     icon: '🏃' },
-  { name: 'Read Books',      icon: '📚' },
-  { name: 'Meditation',      icon: '🧘' },
-  { name: 'Gym Workout',     icon: '💪' },
-  { name: 'Cold Shower',     icon: '🚿' },
-  { name: 'No Junk Food',    icon: '🥗' },
-  { name: 'Sleep by 11',     icon: '😴' },
-  { name: 'LeetCode',        icon: '🎯' },
-  { name: 'GitHub Commit',   icon: '👨‍💻' },
+  { name: 'DSA Practice', icon: '💻' },
+  { name: 'Morning Run', icon: '🏃' },
+  { name: 'Read Books', icon: '📚' },
+  { name: 'Meditation', icon: '🧘' },
+  { name: 'Gym Workout', icon: '💪' },
+  { name: 'Cold Shower', icon: '🚿' },
+  { name: 'No Junk Food', icon: '🥗' },
+  { name: 'Sleep by 11', icon: '😴' },
+  { name: 'LeetCode', icon: '🎯' },
+  { name: 'GitHub Commit', icon: '👨‍💻' },
   { name: 'No Social Media', icon: '🚫' },
-  { name: 'Drink Water',     icon: '💧' },
-  { name: 'Journal',         icon: '✍️' },
-  { name: 'Learn Skills',    icon: '🎨' },
+  { name: 'Drink Water', icon: '💧' },
+  { name: 'Journal', icon: '✍️' },
+  { name: 'Learn Skills', icon: '🎨' },
 ];
 
 // ─── Helper: streak calculation ───────────────────────────────────────────────
 function computeStreak(logs) {
   const today = new Date();
   const toDateStr = (d) => d.toISOString().split('T')[0];
-  const todayStr     = toDateStr(today);
-  const yest         = new Date(today);
+  const todayStr = toDateStr(today);
+  const yest = new Date(today);
   yest.setDate(yest.getDate() - 1);
   const yesterdayStr = toDateStr(yest);
 
@@ -146,48 +148,48 @@ async function apiWithRetry(fn, retries = 2) {
 export default function DashboardScreen({ navigation }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
-  const [habits,      setHabits]      = useState([]);
-  const [habitLogs,   setHabitLogs]   = useState({}); // { [habitId]: { allLogs, todayLog } }
-  const [profile,     setProfile]     = useState({ name: '', email: '' });
-  const [loading,     setLoading]     = useState(true);
-  const [refreshing,  setRefreshing]  = useState(false);
-  const [showAddModal,setShowAddModal]= useState(false);
-  const [newHabit,    setNewHabit]    = useState({
+  const [habits, setHabits] = useState([]);
+  const [habitLogs, setHabitLogs] = useState({}); // { [habitId]: { allLogs, todayLog } }
+  const [profile, setProfile] = useState({ name: '', email: '' });
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newHabit, setNewHabit] = useState({
     name: '', icon: '💧', colorHex: '#10b981', trackingPeriod: 30,
   });
-  const [creating,          setCreating]          = useState(false);
+  const [creating, setCreating] = useState(false);
   const [selectedSuggestion, setSelectedSuggestion] = useState(null);
-  const [showNoteModal,      setShowNoteModal]      = useState(false);
-  const [noteModalHabit,     setNoteModalHabit]     = useState(null);
-  const [noteText,           setNoteText]           = useState('');
-  const [noteSaving,         setNoteSaving]         = useState(false);
-  const [noteFocused,        setNoteFocused]        = useState(false);
-  const [customDays,         setCustomDays]         = useState('');
-  const [showCustomInput,    setShowCustomInput]    = useState(false);
-  const [soundEnabled,       setSoundEnabled]       = useState(true);
-  const [userAvatar,         setUserAvatar]         = useState(null);
-  const [showNoteSuccess,    setShowNoteSuccess]    = useState(false);
-  const [comebackBanner,     setComebackBanner]     = useState(null);
+  const [showNoteModal, setShowNoteModal] = useState(false);
+  const [noteModalHabit, setNoteModalHabit] = useState(null);
+  const [noteText, setNoteText] = useState('');
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteFocused, setNoteFocused] = useState(false);
+  const [customDays, setCustomDays] = useState('');
+  const [showCustomInput, setShowCustomInput] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [userAvatar, setUserAvatar] = useState(null);
+  const [showNoteSuccess, setShowNoteSuccess] = useState(false);
+  const [comebackBanner, setComebackBanner] = useState(null);
   // XP / Level state
-  const [xpData,             setXpData]             = useState({ totalXp: 0, currentLevel: 1, levelName: 'Beginner', progress: 0, xpToNext: 200 });
-  const [showLevelUp,        setShowLevelUp]        = useState(false);
-  const [levelUpInfo,        setLevelUpInfo]        = useState({ level: 1, name: 'Beginner' });
-  const [shieldCount,        setShieldCount]        = useState(0);
-  const [weeklyChallenge,    setWeeklyChallenge]    = useState(null); // { challenge, progress, completed, rank }
+  const [xpData, setXpData] = useState({ totalXp: 0, currentLevel: 1, levelName: 'Beginner', progress: 0, xpToNext: 200 });
+  const [showLevelUp, setShowLevelUp] = useState(false);
+  const [levelUpInfo, setLevelUpInfo] = useState({ level: 1, name: 'Beginner' });
+  const [shieldCount, setShieldCount] = useState(0);
+  const [weeklyChallenge, setWeeklyChallenge] = useState(null); // { challenge, progress, completed, rank }
   const levelUpAnim = useRef(new Animated.Value(0)).current;
-  const progressAnim  = useRef(new Animated.Value(0)).current;
-  const bannerAnim    = useRef(new Animated.Value(0)).current;
+  const progressAnim = useRef(new Animated.Value(0)).current;
+  const bannerAnim = useRef(new Animated.Value(0)).current;
   const bannerFireAnim = useRef(new Animated.Value(1)).current;
 
   // ── Offline context ─────────────────────────────────────────────────────────
   const { isOnline, refreshPendingCount } = useOffline();
 
   // ── Per-habit reminder state ────────────────────────────────────────────────
-  const [reminderHabit,    setReminderHabit]    = useState(null);
-  const [reminderEnabled,  setReminderEnabled]  = useState(false);
-  const [reminderTime,     setReminderTime]     = useState(new Date());
-  const [showTimePicker,   setShowTimePicker]   = useState(false);
-  const [savingReminder,   setSavingReminder]   = useState(false);
+  const [reminderHabit, setReminderHabit] = useState(null);
+  const [reminderEnabled, setReminderEnabled] = useState(false);
+  const [reminderTime, setReminderTime] = useState(new Date());
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [savingReminder, setSavingReminder] = useState(false);
 
   // ── Fetch all data (cache-first / stale-while-revalidate) ───────────────────
   const fetchAll = useCallback(async () => {
@@ -199,7 +201,7 @@ export default function DashboardScreen({ navigation }) {
       setHabits(cachedHabits);
       setLoading(false); // fast path — user sees data immediately
     }
-    if (cachedLogs)   setHabitLogs(cachedLogs);
+    if (cachedLogs) setHabitLogs(cachedLogs);
     if (cachedProfile) setProfile(cachedProfile);
 
     // ── Step 2: refresh from server (background if cache hit) ──────────────
@@ -220,13 +222,16 @@ export default function DashboardScreen({ navigation }) {
       setProfile(profile);
       await saveProfileToCache(profile);
 
-      if (xpRes.data)    setXpData(xpRes.data);
+      if (xpRes.data) setXpData(xpRes.data);
       if (shieldRes.data) setShieldCount(shieldRes.data.shieldCount || 0);
+
+      // Write widget data in background (non-blocking)
+      writeWidgetData({ habits: activeHabits, habitLogs }).catch(() => { });
 
       // Weekly challenge — non-blocking
       api.get('/api/weekly-challenge/my-progress')
         .then(r => { if (r.data) setWeeklyChallenge(r.data); })
-        .catch(() => {});
+        .catch(() => { });
 
       // Fetch all logs in parallel
       const logResults = await Promise.all(
@@ -239,7 +244,7 @@ export default function DashboardScreen({ navigation }) {
       );
 
       const logsMap = {};
-      const today   = todayStr();
+      const today = todayStr();
       for (const { habitId, logs } of logResults) {
         const todayLog = logs.find((l) => l.date === today) || null;
         logsMap[habitId] = { allLogs: logs, todayLog };
@@ -247,7 +252,7 @@ export default function DashboardScreen({ navigation }) {
       setHabitLogs(logsMap);
       await saveLogsToCache(logsMap);
       // Reschedule per-habit reminders with fresh data
-      rescheduleAllHabitReminders(activeHabits).catch(() => {});
+      rescheduleAllHabitReminders(activeHabits).catch(() => { });
     } catch (err) {
       // If server fetch fails but we had cache, don't alert — just keep cached data
       if (!cachedHabits) {
@@ -269,13 +274,13 @@ export default function DashboardScreen({ navigation }) {
     // Re-read soundEnabled so toggling it in ProfileScreen takes effect immediately
     AsyncStorage.getItem('soundEnabled').then((val) => {
       setSoundEnabled(val !== 'false'); // default true
-    }).catch(() => {});
+    }).catch(() => { });
 
     SecureStore.getItemAsync('user_cache').then((raw) => {
       if (raw) {
-        try { setUserAvatar(JSON.parse(raw).avatar || null); } catch (_) {}
+        try { setUserAvatar(JSON.parse(raw).avatar || null); } catch (_) { }
       }
-    }).catch(() => {});
+    }).catch(() => { });
   }, []));
 
   // Animate progress bar when habits/logs change
@@ -298,7 +303,7 @@ export default function DashboardScreen({ navigation }) {
   // ── Refresh single habit's logs ─────────────────────────────────────────────
   const refreshHabitLogs = useCallback(async (habitId) => {
     try {
-      const res  = await api.get(`/api/logs/${habitId}`);
+      const res = await api.get(`/api/logs/${habitId}`);
       const logs = res.data || [];
       const today = todayStr();
       const todayLog = logs.find((l) => l.date === today) || null;
@@ -306,13 +311,13 @@ export default function DashboardScreen({ navigation }) {
         ...prev,
         [habitId]: { allLogs: logs, todayLog },
       }));
-    } catch (_) {}
+    } catch (_) { }
   }, []);
 
   // ── Log action ──────────────────────────────────────────────────────────────
   const handleLogAction = useCallback(
     async (habit, status) => {
-      const entry    = habitLogs[habit._id] || { allLogs: [], todayLog: null };
+      const entry = habitLogs[habit._id] || { allLogs: [], todayLog: null };
       const todayLog = entry.todayLog;
 
       // Capture streak BEFORE the API call so we can detect an increase after.
@@ -354,8 +359,8 @@ export default function DashboardScreen({ navigation }) {
           });
         }
         if (newLogsMap) setHabitLogs(newLogsMap);
-        if (status === 'done') playTickSound(soundEnabled).catch(() => {});
-        else playCrossSound(soundEnabled).catch(() => {});
+        if (status === 'done') playTickSound(soundEnabled).catch(() => { });
+        else playCrossSound(soundEnabled).catch(() => { });
         await refreshPendingCount();
         return; // skip server call
       }
@@ -381,7 +386,7 @@ export default function DashboardScreen({ navigation }) {
         }
         await refreshHabitLogs(habit._id);
         // Mark user active → cancels re-engagement notifications
-        markUserActive().catch(() => {});
+        markUserActive().catch(() => { });
 
         // ── Comeback detection ───────────────────────────────────────────
         // Trigger only when: this is 'done', was the FIRST log today across all
@@ -404,17 +409,17 @@ export default function DashboardScreen({ navigation }) {
               // Auto-dismiss after 6 seconds
               setTimeout(() => setComebackBanner(null), 6000);
             }
-          }).catch(() => {});
+          }).catch(() => { });
         } else if (status === 'done') {
-          markComebackLoggedToday().catch(() => {});
+          markComebackLoggedToday().catch(() => { });
         }
 
         // ── Sounds after successful log ───────────────────────────────────
-        if (status === 'done')   playTickSound(soundEnabled).catch(() => {});
-        if (status === 'missed') playCrossSound(soundEnabled).catch(() => {});
+        if (status === 'done') playTickSound(soundEnabled).catch(() => { });
+        if (status === 'missed') playCrossSound(soundEnabled).catch(() => { });
 
         if (status === 'done' && !todayLog && oldStreak > 0) {
-          playStreakMilestoneSound(soundEnabled).catch(() => {});
+          playStreakMilestoneSound(soundEnabled).catch(() => { });
         }
 
         // XP: update local xpData and trigger level-up modal if needed
@@ -422,15 +427,17 @@ export default function DashboardScreen({ navigation }) {
           const xp = logResponse.xp;
           if (xp.newTotalXp !== undefined) {
             const { current, next, xpIntoLevel, xpNeeded, progress } = getLevelInfo(xp.newTotalXp);
-            setXpData({ totalXp: xp.newTotalXp, currentLevel: current.level, levelName: current.name,
-              progress, xpToNext: next ? next.minXp - xp.newTotalXp : 0 });
+            setXpData({
+              totalXp: xp.newTotalXp, currentLevel: current.level, levelName: current.name,
+              progress, xpToNext: next ? next.minXp - xp.newTotalXp : 0
+            });
           }
           if (xp.leveledUp) {
             setLevelUpInfo({ level: xp.newLevel, name: xp.newLevelName });
             setShowLevelUp(true);
             levelUpAnim.setValue(0);
             Animated.timing(levelUpAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
-            playStreakMilestoneSound(soundEnabled).catch(() => {});
+            playStreakMilestoneSound(soundEnabled).catch(() => { });
             setTimeout(() => setShowLevelUp(false), 3000);
           }
         }
@@ -461,7 +468,7 @@ export default function DashboardScreen({ navigation }) {
     // 1. Optimistic update
     setHabits(data);
     // 2. Drop haptic
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => { });
     // 3. Persist (fire-and-forget — don't block UI)
     api.patch('/api/habits/reorder', {
       order: data.map((h, i) => ({ id: h._id, sortOrder: i })),
@@ -485,7 +492,7 @@ export default function DashboardScreen({ navigation }) {
       ));
       const updated = { ...reminderHabit, reminderEnabled, reminderTime: reminderEnabled ? timeStr : null };
       if (reminderEnabled) await scheduleHabitReminderNotif(updated);
-      else                  await cancelHabitReminderNotif(reminderHabit._id);
+      else await cancelHabitReminderNotif(reminderHabit._id);
       setReminderHabit(null);
     } catch (e) {
       Alert.alert('Error', e.response?.data?.message || 'Could not save reminder.');
@@ -506,9 +513,9 @@ export default function DashboardScreen({ navigation }) {
     setCreating(true);
     try {
       await api.post('/api/habits', {
-        name:           newHabit.name.trim(),
-        icon:           newHabit.icon,
-        colorHex:       newHabit.colorHex,
+        name: newHabit.name.trim(),
+        icon: newHabit.icon,
+        colorHex: newHabit.colorHex,
         trackingPeriod: finalDays,
       });
       setShowAddModal(false);
@@ -528,7 +535,7 @@ export default function DashboardScreen({ navigation }) {
   const handleSaveNote = useCallback(async () => {
     if (!noteModalHabit) return;
     const todayLog = habitLogs[noteModalHabit._id]?.todayLog;
-    const noteKey  = `note_${noteModalHabit._id}_${todayStr()}`;
+    const noteKey = `note_${noteModalHabit._id}_${todayStr()}`;
     setNoteSaving(true);
     try {
       // Try API first (requires a log to exist)
@@ -560,14 +567,14 @@ export default function DashboardScreen({ navigation }) {
   }, [habitLogs, noteModalHabit, noteText, refreshHabitLogs]);
 
   // ── Derived stats ───────────────────────────────────────────────────────────
-  const statsDone   = habits.filter((h) => habitLogs[h._id]?.todayLog?.status === 'done').length;
+  const statsDone = habits.filter((h) => habitLogs[h._id]?.todayLog?.status === 'done').length;
   const statsMissed = habits.filter((h) => habitLogs[h._id]?.todayLog?.status === 'missed').length;
-  const firstName   = profile.name ? profile.name.split(' ')[0] : 'there';
-  const initial     = profile.name ? profile.name[0].toUpperCase() : '?';
+  const firstName = profile.name ? profile.name.split(' ')[0] : 'there';
+  const initial = profile.name ? profile.name[0].toUpperCase() : '?';
 
   // ── Week data ───────────────────────────────────────────────────────────────
-  const MONTH_S = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const DAY_LABELS = ['MON','TUE','WED','THU','FRI','SAT','SUN'];
+  const MONTH_S = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const DAY_LABELS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
   const nowDate = new Date();
   const dow = nowDate.getDay();
   const mondayOffset = dow === 0 ? -6 : 1 - dow;
@@ -588,8 +595,8 @@ export default function DashboardScreen({ navigation }) {
     return { date: ds, dayLabel: DAY_LABELS[i], dayNum: d.getDate(), isToday, isFuture, habitStatuses };
   });
   const todayDay = weekData.find((d) => d.isToday);
-  const weekDoneToday    = todayDay?.habitStatuses.filter((s) => s.status === 'done').length || 0;
-  const weekMissedToday  = todayDay?.habitStatuses.filter((s) => s.status === 'missed').length || 0;
+  const weekDoneToday = todayDay?.habitStatuses.filter((s) => s.status === 'done').length || 0;
+  const weekMissedToday = todayDay?.habitStatuses.filter((s) => s.status === 'missed').length || 0;
   const weekPendingToday = habits.length - weekDoneToday - weekMissedToday;
   const bestDayIdx = weekData.reduce((bi, day, idx) => {
     const cnt = day.habitStatuses.filter((s) => s.status === 'done').length;
@@ -728,6 +735,11 @@ export default function DashboardScreen({ navigation }) {
         {/* ── Weekly summary card (Sunday/Monday only, dismissable) ── */}
         <WeeklySummaryCard colors={colors} />
 
+        {/* ── One-time widget tip card (shown until user dismisses) ── */}
+        <WidgetTipCard
+          onHowToAdd={() => navigation.navigate('WidgetInstructions')}
+        />
+
         {/* ── Progress bar ── */}
         {habits.length > 0 && (
           <View style={styles.progressSection}>
@@ -766,10 +778,10 @@ export default function DashboardScreen({ navigation }) {
                             backgroundColor: day.isFuture
                               ? colors.border
                               : hs.status === 'done'
-                              ? hs.colorHex
-                              : hs.status === 'missed'
-                              ? colors.danger
-                              : colors.borderHover,
+                                ? hs.colorHex
+                                : hs.status === 'missed'
+                                  ? colors.danger
+                                  : colors.borderHover,
                             opacity: day.isFuture ? 0.3 : 1,
                           }]}
                         />
@@ -811,15 +823,15 @@ export default function DashboardScreen({ navigation }) {
             data={habits}
             keyExtractor={(h) => h._id}
             onDragBegin={() =>
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => { })
             }
             onDragEnd={handleReorder}
             scrollEnabled={false}
             renderItem={({ item: habit, drag, isActive }) => {
-              const entry    = habitLogs[habit._id] || { allLogs: [], todayLog: null };
+              const entry = habitLogs[habit._id] || { allLogs: [], todayLog: null };
               const todayLog = entry.todayLog;
-              const streak   = computeStreak(entry.allLogs);
-              const isDone   = todayLog?.status === 'done';
+              const streak = computeStreak(entry.allLogs);
+              const isDone = todayLog?.status === 'done';
               const isMissed = todayLog?.status === 'missed';
               return (
                 <ScaleDecorator activeScale={1.02}>
@@ -867,7 +879,7 @@ export default function DashboardScreen({ navigation }) {
                               try {
                                 const local = await AsyncStorage.getItem(`note_${habit._id}_${todayStr()}`);
                                 if (local) savedNote = local;
-                              } catch (_) {}
+                              } catch (_) { }
                             }
                             setNoteText(savedNote);
                             setNoteModalHabit(habit);
@@ -904,7 +916,7 @@ export default function DashboardScreen({ navigation }) {
 
         {/* ── Weekly Challenge Card ── */}
         {weeklyChallenge?.challenge && (() => {
-          const wc  = weeklyChallenge.challenge;
+          const wc = weeklyChallenge.challenge;
           const pct = Math.min(1, (weeklyChallenge.progress || 0) / (wc.targetValue || 1));
           return (
             <TouchableOpacity
@@ -932,8 +944,8 @@ export default function DashboardScreen({ navigation }) {
                 <Text style={styles.wcBarLabel}>
                   {weeklyChallenge.progress} / {wc.targetValue}{' '}
                   {wc.type === 'daily_log' ? 'days' :
-                   wc.type === 'streak'    ? 'day streak' :
-                   wc.type === 'early_bird'? 'early days' : 'days'}
+                    wc.type === 'streak' ? 'day streak' :
+                      wc.type === 'early_bird' ? 'early days' : 'days'}
                 </Text>
                 <Text style={styles.wcParticipants}>
                   {(wc.participantCount || 0).toLocaleString()} participants
@@ -1187,15 +1199,19 @@ export default function DashboardScreen({ navigation }) {
       {/* ── Level-Up Modal overlay ── */}
       <Modal visible={showLevelUp} transparent animationType="none" onRequestClose={() => setShowLevelUp(false)}>
         <Animated.View style={[
-          { flex: 1, alignItems: 'center', justifyContent: 'center',
-            backgroundColor: 'rgba(0,0,0,0.82)' },
+          {
+            flex: 1, alignItems: 'center', justifyContent: 'center',
+            backgroundColor: 'rgba(0,0,0,0.82)'
+          },
           { opacity: levelUpAnim },
         ]}>
           <Animated.View style={[
-            { alignItems: 'center', paddingHorizontal: 40, paddingVertical: 48,
+            {
+              alignItems: 'center', paddingHorizontal: 40, paddingVertical: 48,
               backgroundColor: '#1a1033', borderRadius: 28, borderWidth: 1,
               borderColor: '#7c3aed88', width: '88%', shadowColor: '#7c3aed',
-              shadowOpacity: 0.6, shadowRadius: 32, elevation: 20 },
+              shadowOpacity: 0.6, shadowRadius: 32, elevation: 20
+            },
             { transform: [{ scale: levelUpAnim.interpolate({ inputRange: [0, 1], outputRange: [0.75, 1] }) }] },
           ]}>
             <Text style={{ fontSize: 56, marginBottom: 8 }}>{getLevelIcon(levelUpInfo.level)}</Text>
@@ -1254,7 +1270,7 @@ export default function DashboardScreen({ navigation }) {
                 activeOpacity={0.8}
               >
                 <Text style={styles.reminderTimeTxt}>
-                  {String(reminderTime.getHours()).padStart(2,'0')}:{String(reminderTime.getMinutes()).padStart(2,'0')}
+                  {String(reminderTime.getHours()).padStart(2, '0')}:{String(reminderTime.getMinutes()).padStart(2, '0')}
                 </Text>
                 <Text style={{ color: colors.primary, fontSize: 12, marginTop: 2 }}>Tap to change</Text>
               </TouchableOpacity>
@@ -1902,13 +1918,13 @@ const makeStyles = (colors) => StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 4, marginBottom: 20,
   },
-  reminderLabel:  { color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
+  reminderLabel: { color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
   reminderToggle: {
     width: 48, height: 26, borderRadius: 13, backgroundColor: colors.border,
     justifyContent: 'center', padding: 2,
   },
   reminderToggleOn: { backgroundColor: colors.primary },
-  reminderThumb:  { width: 22, height: 22, borderRadius: 11, backgroundColor: '#fff' },
+  reminderThumb: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#fff' },
   reminderThumbOn: { alignSelf: 'flex-end' },
   reminderTimePill: {
     alignSelf: 'center', alignItems: 'center',
@@ -1941,11 +1957,11 @@ const makeStyles = (colors) => StyleSheet.create({
     shadowRadius: 12,
     elevation: 8,
   },
-  comebackFire:    { fontSize: 32 },
+  comebackFire: { fontSize: 32 },
   comebackTextCol: { flex: 1 },
-  comebackTitle:   { color: '#ffffff', fontSize: 15, fontWeight: '700', marginBottom: 2 },
-  comebackBody:    { color: 'rgba(255,255,255,0.82)', fontSize: 12, lineHeight: 17 },
-  comebackClose:   { color: 'rgba(255,255,255,0.5)', fontSize: 18, paddingLeft: 4 },
+  comebackTitle: { color: '#ffffff', fontSize: 15, fontWeight: '700', marginBottom: 2 },
+  comebackBody: { color: 'rgba(255,255,255,0.82)', fontSize: 12, lineHeight: 17 },
+  comebackClose: { color: 'rgba(255,255,255,0.5)', fontSize: 18, paddingLeft: 4 },
 
   // ── Weekly Challenge card ────────────────────────────────────────────────
   wcCard: {
@@ -1963,18 +1979,18 @@ const makeStyles = (colors) => StyleSheet.create({
     shadowRadius: 10,
     elevation: 4,
   },
-  wcCardHeader:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  wcBadge:         { backgroundColor: colors.primary + '22', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
-  wcBadgeTxt:      { color: colors.primary, fontSize: 10, fontWeight: '800', letterSpacing: 0.6 },
-  wcDaysLeft:      { color: colors.textMuted, fontSize: 12, fontWeight: '600' },
-  wcTitle:         { color: colors.textPrimary, fontSize: 16, fontWeight: '800', marginBottom: 4 },
-  wcDesc:          { color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 12 },
-  wcBarTrack:      { height: 6, backgroundColor: colors.border, borderRadius: 4, overflow: 'hidden', marginBottom: 6 },
-  wcBarFill:       { height: '100%', backgroundColor: colors.primary, borderRadius: 4 },
-  wcBarRow:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  wcBarLabel:      { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
-  wcParticipants:  { color: colors.textMuted, fontSize: 11 },
-  wcCompletedBadge:{ marginTop: 10, backgroundColor: '#16a34a22', borderRadius: 8, borderWidth: 1, borderColor: '#16a34a44', paddingVertical: 6, alignItems: 'center' },
-  wcCompletedTxt:  { color: '#16a34a', fontSize: 13, fontWeight: '700' },
+  wcCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  wcBadge: { backgroundColor: colors.primary + '22', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  wcBadgeTxt: { color: colors.primary, fontSize: 10, fontWeight: '800', letterSpacing: 0.6 },
+  wcDaysLeft: { color: colors.textMuted, fontSize: 12, fontWeight: '600' },
+  wcTitle: { color: colors.textPrimary, fontSize: 16, fontWeight: '800', marginBottom: 4 },
+  wcDesc: { color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: 12 },
+  wcBarTrack: { height: 6, backgroundColor: colors.border, borderRadius: 4, overflow: 'hidden', marginBottom: 6 },
+  wcBarFill: { height: '100%', backgroundColor: colors.primary, borderRadius: 4 },
+  wcBarRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  wcBarLabel: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
+  wcParticipants: { color: colors.textMuted, fontSize: 11 },
+  wcCompletedBadge: { marginTop: 10, backgroundColor: '#16a34a22', borderRadius: 8, borderWidth: 1, borderColor: '#16a34a44', paddingVertical: 6, alignItems: 'center' },
+  wcCompletedTxt: { color: '#16a34a', fontSize: 13, fontWeight: '700' },
 });
 

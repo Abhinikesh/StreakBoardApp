@@ -8,6 +8,7 @@ import { ThemeProvider } from './src/context/ThemeContext';
 import { OfflineProvider } from './src/context/OfflineContext';
 import { preloadSounds, unloadSounds } from './src/lib/sound';
 import { checkReEngagement } from './src/lib/reengagement';
+import { markInstallDate } from './src/lib/reviewPrompt';
 
 export default function App() {
   const appStateRef = useRef(AppState.currentState);
@@ -21,6 +22,7 @@ export default function App() {
   // ── Sound preload ──────────────────────────────────────────────────────────
   useEffect(() => {
     preloadSounds();
+    markInstallDate(); // idempotent — only sets once on first ever launch
     return () => { unloadSounds(); };
   }, []);
 

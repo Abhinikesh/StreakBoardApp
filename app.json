@@ -61,7 +61,36 @@
           "defaultChannel": "default"
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "react-native-android-widget",
+        {
+          "widgets": [
+            {
+              "name": "StreakSmall",
+              "label": "StreakBoard – Small",
+              "description": "Current streak and today's habit progress",
+              "minWidth": "110dp",
+              "minHeight": "110dp",
+              "targetCellWidth": 2,
+              "targetCellHeight": 2,
+              "updatePeriodMillis": 1800000,
+              "widgetFeatures": ["RECONFIGURABLE"]
+            },
+            {
+              "name": "StreakMedium",
+              "label": "StreakBoard",
+              "description": "Streak, progress, and today's habit list",
+              "minWidth": "250dp",
+              "minHeight": "110dp",
+              "targetCellWidth": 4,
+              "targetCellHeight": 2,
+              "updatePeriodMillis": 1800000,
+              "widgetFeatures": ["RECONFIGURABLE"]
+            }
+          ]
+        }
+      ]
     ],
     "extra": {
       "eas": {

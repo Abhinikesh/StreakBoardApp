@@ -20,9 +20,12 @@ import SeasonDetailScreen       from '../screens/SeasonDetailScreen';
 import WeeklyChallengeScreen    from '../screens/WeeklyChallengeScreen';
 import MessagesScreen           from '../screens/MessagesScreen';
 import ConversationScreen       from '../screens/ConversationScreen';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme, DARK } from '../context/ThemeContext';
 import SplashScreen from '../screens/SplashScreen';
 import EditProfileScreen from '../screens/EditProfileScreen';
+import WidgetInstructionsScreen from '../screens/WidgetInstructionsScreen';
+import OnboardingScreen, { ONBOARDING_KEY } from '../screens/OnboardingScreen';
 
 // ── Error Boundary: catches render errors in PublicProfileScreen ─────────────
 class ErrorBoundary extends Component {
@@ -158,7 +161,9 @@ function RootStack({ initialRoute }) {
       <Stack.Screen name="WeeklyChallenge"   component={WeeklyChallengeScreen} />
       <Stack.Screen name="Messages"          component={MessagesScreen} />
       <Stack.Screen name="Conversation"      component={ConversationScreen} />
-      <Stack.Screen name="EditProfile"       component={EditProfileScreen} />
+      <Stack.Screen name="EditProfile"          component={EditProfileScreen} />
+      <Stack.Screen name="WidgetInstructions"   component={WidgetInstructionsScreen} />
+      <Stack.Screen name="Onboarding"           component={OnboardingScreen} />
     </Stack.Navigator>
   );
 }
@@ -174,7 +179,10 @@ export default function AppNavigator() {
     (async () => {
       try {
         const token = await SecureStore.getItemAsync('token');
-        setStatus(token ? 'main' : 'auth');
+        if (!token) { setStatus('auth'); return; }
+        // Check if first-time user (hasn't completed onboarding)
+        const onboardingDone = await AsyncStorage.getItem(ONBOARDING_KEY).catch(() => null);
+        setStatus(onboardingDone ? 'main' : 'onboarding');
       } catch (_) {
         setStatus('auth');
       }
@@ -185,7 +193,13 @@ export default function AppNavigator() {
 
   return (
     <NavigationContainer>
-      <RootStack initialRoute={status === 'main' ? 'Main' : 'Login'} />
+      <RootStack
+        initialRoute={
+          status === 'main'        ? 'Main'       :
+          status === 'onboarding'  ? 'Onboarding' :
+          'Login'
+        }
+      />
     </NavigationContainer>
   );
 }
