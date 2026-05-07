@@ -73,6 +73,13 @@ const MEDAL       = ['🥇', '🥈', '🥉'];
 const MEDAL_COLOR = ['#FFD700', '#C0C0C0', '#CD7F32'];
 const PODIUM_H    = [90, 60, 50];
 
+// Metric tab definitions for the "All Time" view
+const TABS = [
+  ['streak', '🔥 Streak'],
+  ['rate',   '📊 Rate'],
+  ['done',   '✅ Done'],
+];
+
 // A user is considered "inactive" when their current streak is 0
 const isInactive = (entry) => (entry?.currentStreak ?? 0) === 0;
 

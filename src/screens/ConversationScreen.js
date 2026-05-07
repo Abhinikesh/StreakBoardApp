@@ -62,17 +62,37 @@ export default function ConversationScreen({ route, navigation }) {
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
-    if (!text) return;
+    if (!text || sending) return;
     setSending(true);
+
+    // Optimistic update — show the message immediately
+    const optimisticMsg = {
+      _id:        `opt-${Date.now()}`,
+      senderId:   myId,
+      receiverId: friendId,
+      content:    text,
+      createdAt:  new Date().toISOString(),
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
+    setInput('');
+
     try {
-      await api.post('/api/messages/send', { receiverId: friendId, content: text });
-      setInput('');
+      console.log('[ConversationScreen] sendMessage payload:', { receiverId: friendId, content: text });
+      const res = await api.post('/api/messages/send', { receiverId: friendId, content: text });
+      console.log('[ConversationScreen] sendMessage success:', res.data?._id);
+      // Replace optimistic entry with real server entry on next poll
       await fetchMessages(true);
     } catch (e) {
-      const msg = e.response?.data?.message || 'Could not send message.';
-      Alert.alert('Error', msg);
-    } finally { setSending(false); }
-  }, [input, friendId, fetchMessages]);
+      console.error('[ConversationScreen] sendMessage error:', e?.message, e?.response?.data);
+      // Roll back the optimistic message
+      setMessages(prev => prev.filter(m => m._id !== optimisticMsg._id));
+      setInput(text); // restore typed text
+      const errMsg = e?.response?.data?.message || e?.message || 'Could not send message.';
+      Alert.alert('Error', errMsg);
+    } finally {
+      setSending(false);
+    }
+  }, [input, friendId, myId, fetchMessages, sending]);
 
   const handleBlock = useCallback(() => {
     Alert.alert(`Block ${friendName}?`, 'They will not be able to message you.', [

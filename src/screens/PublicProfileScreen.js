@@ -58,6 +58,29 @@ function Skel({ w = '100%', h = 18, r = 8, style }) {
   );
 }
 
+// ── AvatarInner: defined at MODULE level (never inside render) ─────────────────
+// Defining a component inside another component's render body causes React to
+// treat it as a NEW component type on every render → unmount/remount loop →
+// crash caught by ErrorBoundary. This is the root cause of "Something went wrong".
+function AvatarInner({ avatar, avatarBg, displayName }) {
+  const initial = (displayName && displayName.length > 0)
+    ? displayName[0].toUpperCase()
+    : '?';
+  if (avatar) {
+    return (
+      <Image source={{ uri: avatar }} style={{ width: 96, height: 96, borderRadius: 48 }} />
+    );
+  }
+  return (
+    <View style={{
+      width: 96, height: 96, borderRadius: 48,
+      backgroundColor: avatarBg, alignItems: 'center', justifyContent: 'center',
+    }}>
+      <Text style={{ color: '#fff', fontSize: 38, fontWeight: '700' }}>{initial}</Text>
+    </View>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function PublicProfileScreen({ route, navigation }) {
   const { colors } = useTheme();
@@ -169,7 +192,8 @@ export default function PublicProfileScreen({ route, navigation }) {
   const memberSince = p.createdAt
     ? new Date(p.createdAt).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
     : null;
-  const displayName = p.name || userName || 'StreakBoard User';
+  // Guard: ensure displayName is never an empty string so displayName[0] can't throw
+  const displayName = (p.name || userName || 'StreakBoard User').trim() || 'StreakBoard User';
 
   const shareProfile = async () => {
     const link = shareCode
@@ -179,12 +203,8 @@ export default function PublicProfileScreen({ route, navigation }) {
     setToast(true);
     setTimeout(() => setToast(false), 2600);
   };
-
-  const AvatarInner = () => p.avatar
-    ? <Image source={{ uri: p.avatar }} style={{ width: 96, height: 96, borderRadius: 48 }} />
-    : <View style={{ width: 96, height: 96, borderRadius: 48, backgroundColor: avatarBg, alignItems: 'center', justifyContent: 'center' }}>
-        <Text style={{ color: '#fff', fontSize: 38, fontWeight: '700' }}>{(displayName[0] || '?').toUpperCase()}</Text>
-      </View>;
+  // NOTE: AvatarInner is now a module-level component (above) — not inline here.
+  // Defining it inline caused a new component type every render → unmount loop → crash.
 
   // ── Loading screen ────────────────────────────────────────────────────────────
   if (loading) {
@@ -257,12 +277,12 @@ export default function PublicProfileScreen({ route, navigation }) {
               shadowColor: '#F59E0B', shadowOpacity: 0.7, shadowRadius: 14, elevation: 12,
               transform: [{ scale: goldGlow }],
             }}>
-              <AvatarInner />
+              <AvatarInner avatar={p.avatar} avatarBg={avatarBg} displayName={displayName} />
             </Animated.View>
           ) : (
             <View style={{ borderRadius: 56, borderWidth: 4, borderColor: ringColor,
               shadowColor: ringColor, shadowOpacity: 0.55, shadowRadius: 10, elevation: 8 }}>
-              <AvatarInner />
+              <AvatarInner avatar={p.avatar} avatarBg={avatarBg} displayName={displayName} />
             </View>
           )}
 
