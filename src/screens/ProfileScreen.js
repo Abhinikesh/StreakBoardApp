@@ -87,7 +87,7 @@ export default function ProfileScreen({ navigation }) {
       // seasonBadges live on the User doc, already fetched via /api/user/profile
       // We read them directly from profile.seasonBadges in the render.
 
-      const remSettings = await getReminderSettings();
+      const remSettings = await getReminderSettings(p._id);
       setNotifEnabled(remSettings.enabled);
       setReminderTime(remSettings.time);
 
@@ -146,13 +146,13 @@ export default function ProfileScreen({ navigation }) {
         return;
       }
       setNotifEnabled(true);
-      const success = await scheduleHabitReminder(reminderTime);
-      if (success) Alert.alert('✅ Reminder set', `You'll get a reminder every day at ${reminderTime}`);
+      const success = await scheduleHabitReminder(reminderTime, profile._id);
+      if (success) Alert.alert('\u2705 Reminder set', `You'll get a reminder every day at ${reminderTime}`);
     } else {
-      await cancelHabitReminder();
+      await cancelHabitReminder(profile._id);
       setNotifEnabled(false);
     }
-  }, [reminderTime]);
+  }, [reminderTime, profile._id]);
 
   const handleReminderTimeSave = useCallback(async () => {
     // Validate HH:MM format
@@ -171,10 +171,11 @@ export default function ProfileScreen({ navigation }) {
         setSavingReminder(false);
         return;
       }
-      const success = await scheduleHabitReminder(reminderTime.trim());
+      // Pass userId so the time is stored under this user's key only
+      const success = await scheduleHabitReminder(reminderTime.trim(), profile._id);
       if (success) {
         setNotifEnabled(true);
-        Alert.alert('✅ Reminder saved', `You'll get a daily nudge at ${reminderTime}`);
+        Alert.alert('\u2705 Reminder saved', `You'll get a daily nudge at ${reminderTime}`);
       } else {
         Alert.alert('Error', 'Could not schedule reminder. Try again.');
       }
@@ -183,7 +184,7 @@ export default function ProfileScreen({ navigation }) {
     } finally {
       setSavingReminder(false);
     }
-  }, [reminderTime]);
+  }, [reminderTime, profile._id]);
 
   const handleToggleSound = useCallback(async (val) => {
     setSoundEnabled(val);
@@ -263,6 +264,18 @@ export default function ProfileScreen({ navigation }) {
       ],
     );
   }, []);
+
+  // ── Reorder habit (↑/↓ arrows — Dashboard reflects on next focus) ──────────
+  const handleReorderHabit = useCallback(async (index, direction) => {
+    const newHabits = [...habits];
+    const swapIdx = index + direction; // -1 = up, +1 = down
+    if (swapIdx < 0 || swapIdx >= newHabits.length) return;
+    [newHabits[index], newHabits[swapIdx]] = [newHabits[swapIdx], newHabits[index]];
+    setHabits(newHabits);
+    api.patch('/api/habits/reorder', {
+      order: newHabits.map((h, i) => ({ id: h._id, sortOrder: i })),
+    }).catch(() => {});
+  }, [habits]);
 
   // ── Avatar picker & upload ────────────────────────────────────────────────
   const handlePickAvatar = useCallback(async () => {
@@ -561,7 +574,7 @@ export default function ProfileScreen({ navigation }) {
                 borderBottomColor: colors.border,
               }}
             >
-              <Text style={{ fontSize: 20, marginRight: 10 }}>{habit.icon || '📌'}</Text>
+              <Text style={{ fontSize: 20, marginRight: 10 }}>{habit.icon || '\ud83d\udccc'}</Text>
               <View style={{ flex: 1 }}>
                 <Text style={{ color: colors.textPrimary, fontSize: 14, fontWeight: '600' }}>
                   {habit.name}
@@ -570,6 +583,26 @@ export default function ProfileScreen({ navigation }) {
                   {habit.trackingPeriod || 30}-day goal
                 </Text>
               </View>
+              {/* Reorder arrows */}
+              <TouchableOpacity
+                onPress={() => handleReorderHabit(i, -1)}
+                disabled={i === 0}
+                style={{ padding: 6, opacity: i === 0 ? 0.25 : 1 }}
+                hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                activeOpacity={0.65}
+              >
+                <Text style={{ color: colors.textMuted, fontSize: 16 }}>↑</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => handleReorderHabit(i, 1)}
+                disabled={i === habits.length - 1}
+                style={{ padding: 6, opacity: i === habits.length - 1 ? 0.25 : 1 }}
+                hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                activeOpacity={0.65}
+              >
+                <Text style={{ color: colors.textMuted, fontSize: 16 }}>↓</Text>
+              </TouchableOpacity>
+              {/* Delete */}
               <TouchableOpacity
                 onPress={() => confirmDeleteHabit(habit._id, habit.name)}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}

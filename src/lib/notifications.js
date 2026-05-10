@@ -18,10 +18,26 @@ import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
-const CHANNEL_ID           = 'streakboard-daily-reminder';
-const GLOBAL_NOTIF_ID      = 'global-habit-reminder';
-const REMINDER_TIME_KEY    = 'reminderTime';
-const REMINDER_ENABLED_KEY = 'reminderEnabled';
+const CHANNEL_ID             = 'streakboard-daily-reminder';
+const GLOBAL_NOTIF_ID        = 'global-habit-reminder';
+// Generic (legacy) keys — kept for backwards-compat / fallback only
+const REMINDER_TIME_KEY_BASE    = 'reminderTime';
+const REMINDER_ENABLED_KEY_BASE = 'reminderEnabled';
+
+// Return user-scoped storage keys so each account has independent settings.
+function getReminderKeys(userId) {
+  if (!userId) {
+    // No userId yet (e.g. during initial app load) — use legacy global keys
+    return {
+      timeKey:    REMINDER_TIME_KEY_BASE,
+      enabledKey: REMINDER_ENABLED_KEY_BASE,
+    };
+  }
+  return {
+    timeKey:    `reminderTime_${userId}`,
+    enabledKey: `reminderEnabled_${userId}`,
+  };
+}
 
 // ── Global notification handler ────────────────────────────────────────────────
 Notifications.setNotificationHandler({
@@ -66,9 +82,11 @@ export async function requestNotificationPermission() {
 // ── Schedule a daily repeating reminder ───────────────────────────────────────
 /**
  * @param {string} timeStr  "HH:MM" in 24-hour format, e.g. "20:00"
+ * @param {string} [userId] The current user's ID — used to scope storage keys
+ *                          so different accounts have independent reminder times.
  * @returns {Promise<boolean>} true on success
  */
-export async function scheduleHabitReminder(timeStr) {
+export async function scheduleHabitReminder(timeStr, userId) {
   try {
     const [hourStr, minStr] = (timeStr || '20:00').split(':');
     const hour   = parseInt(hourStr, 10);
@@ -85,11 +103,7 @@ export async function scheduleHabitReminder(timeStr) {
     // Ensure the Android channel is ready
     await ensureAndroidChannel();
 
-    // ── THE CORE FIX ─────────────────────────────────────────────────────────
-    // expo-notifications ≥ 0.29 requires an explicit `type` property on the
-    // trigger.  Without it every internal parser (parseCalendarTrigger,
-    // parseDailyTrigger, …) returns undefined and the library throws.
-    // SchedulableTriggerInputTypes.DAILY = "daily" — fires every day at hour:minute.
+    // expo-notifications ≥ 0.29 requires an explicit `type` property on the trigger.
     await Notifications.scheduleNotificationAsync({
       identifier: GLOBAL_NOTIF_ID,
       content: {
@@ -106,10 +120,11 @@ export async function scheduleHabitReminder(timeStr) {
       },
     });
 
-    // Persist so ProfileScreen can restore state after restart
+    // Persist using user-scoped keys so each account has its own reminder time.
+    const { timeKey, enabledKey } = getReminderKeys(userId);
     await AsyncStorage.multiSet([
-      [REMINDER_TIME_KEY,    timeStr],
-      [REMINDER_ENABLED_KEY, 'true'],
+      [timeKey,    timeStr],
+      [enabledKey, 'true'],
     ]);
 
     return true;
@@ -120,10 +135,14 @@ export async function scheduleHabitReminder(timeStr) {
 }
 
 // ── Cancel the daily reminder ──────────────────────────────────────────────────
-export async function cancelHabitReminder() {
+/**
+ * @param {string} [userId] User ID for scoped storage key.
+ */
+export async function cancelHabitReminder(userId) {
   try {
     await Notifications.cancelScheduledNotificationAsync(GLOBAL_NOTIF_ID).catch(() => {});
-    await AsyncStorage.setItem(REMINDER_ENABLED_KEY, 'false');
+    const { enabledKey } = getReminderKeys(userId);
+    await AsyncStorage.setItem(enabledKey, 'false');
     return true;
   } catch (e) {
     if (__DEV__) console.warn('cancelHabitReminder:', e);
@@ -132,13 +151,32 @@ export async function cancelHabitReminder() {
 }
 
 // ── Read persisted reminder settings ──────────────────────────────────────────
-export async function getReminderSettings() {
+/**
+ * @param {string} [userId] User ID for scoped storage key. Falls back to the
+ *                          legacy generic key when not provided so existing
+ *                          installations continue to work.
+ */
+export async function getReminderSettings(userId) {
   try {
+    const { timeKey, enabledKey } = getReminderKeys(userId);
     const [[, enabled], [, time]] = await AsyncStorage.multiGet([
-      REMINDER_ENABLED_KEY,
-      REMINDER_TIME_KEY,
+      enabledKey,
+      timeKey,
     ]);
-    return { enabled: enabled === 'true', time: time || '20:00' };
+
+    // Migration: if user-scoped keys are empty, check legacy global keys
+    let resolvedEnabled = enabled;
+    let resolvedTime    = time;
+    if (userId && (resolvedEnabled === null || resolvedEnabled === undefined)) {
+      const [[, legacyEnabled], [, legacyTime]] = await AsyncStorage.multiGet([
+        REMINDER_ENABLED_KEY_BASE,
+        REMINDER_TIME_KEY_BASE,
+      ]);
+      resolvedEnabled = legacyEnabled;
+      resolvedTime    = legacyTime;
+    }
+
+    return { enabled: resolvedEnabled === 'true', time: resolvedTime || '20:00' };
   } catch (_) {
     return { enabled: false, time: '20:00' };
   }

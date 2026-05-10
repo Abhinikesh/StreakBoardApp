@@ -3,6 +3,7 @@ import {
   View,
   Text,
   ScrollView,
+  FlatList,
   TouchableOpacity,
   TextInput,
   Modal,
@@ -39,8 +40,6 @@ import {
   rescheduleAllHabitReminders, ensureNotificationPermission,
 } from '../lib/habitReminders';
 import WeeklySummaryCard from '../components/WeeklySummaryCard';
-import DraggableFlatList, { ScaleDecorator, ShadowDecorator } from 'react-native-draggable-flatlist';
-import * as Haptics from 'expo-haptics';
 import { writeWidgetData } from '../lib/widgetData';
 import WidgetTipCard from '../components/WidgetTipCard';
 
@@ -190,6 +189,8 @@ export default function DashboardScreen({ navigation }) {
   const [reminderTime, setReminderTime] = useState(new Date());
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [savingReminder, setSavingReminder] = useState(false);
+  // ── Overflow ("...") menu state — shows ⏰/📅 so main card stays clean ───────
+  const [overflowHabit, setOverflowHabit] = useState(null);
 
   // ── Fetch all data (cache-first / stale-while-revalidate) ───────────────────
   const fetchAll = useCallback(async () => {
@@ -463,17 +464,8 @@ export default function DashboardScreen({ navigation }) {
     setShowTimePicker(false);
   }, []);
 
-  // ── Drag-to-reorder ────────────────────────────────────────────────────
-  const handleReorder = useCallback(async ({ data }) => {
-    // 1. Optimistic update
-    setHabits(data);
-    // 2. Drop haptic
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => { });
-    // 3. Persist (fire-and-forget — don't block UI)
-    api.patch('/api/habits/reorder', {
-      order: data.map((h, i) => ({ id: h._id, sortOrder: i })),
-    }).catch(err => console.warn('[reorder] save failed:', err.message));
-  }, []);
+
+  // Drag-to-reorder removed — reordering is now done from Profile > MY HABITS.
 
   const handleSaveReminder = useCallback(async () => {
     if (!reminderHabit) return;
@@ -819,96 +811,79 @@ export default function DashboardScreen({ navigation }) {
             </TouchableOpacity>
           </View>
         ) : (
-          <DraggableFlatList
+          <FlatList
             data={habits}
             keyExtractor={(h) => h._id}
-            onDragBegin={() =>
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => { })
-            }
-            onDragEnd={handleReorder}
             scrollEnabled={false}
-            renderItem={({ item: habit, drag, isActive }) => {
+            renderItem={({ item: habit }) => {
               const entry = habitLogs[habit._id] || { allLogs: [], todayLog: null };
               const todayLog = entry.todayLog;
               const streak = computeStreak(entry.allLogs);
               const isDone = todayLog?.status === 'done';
               const isMissed = todayLog?.status === 'missed';
               return (
-                <ScaleDecorator activeScale={1.02}>
-                  <ShadowDecorator>
-                    <View style={[styles.habitCard, isActive && styles.habitCardDragging]}>
-                      <View style={[styles.accentBar, { backgroundColor: habit.colorHex || colors.primary }]} />
-                      <View style={styles.habitMiddle}>
-                        <View style={styles.habitNameRow}>
-                          <Text style={styles.habitIcon}>{habit.icon}</Text>
-                          <Text style={styles.habitName} numberOfLines={1}>{habit.name}</Text>
-                          {habit.reminderEnabled && <Text style={styles.reminderBadge}>⏰</Text>}
-                        </View>
-                        <View style={styles.habitStreakRow}>
-                          {streak > 0 ? (
-                            <>
-                              <Text style={styles.streakFire}>🔥</Text>
-                              <Text style={styles.streakText}>{streak} day streak</Text>
-                            </>
-                          ) : (
-                            <Text style={styles.streakZero}>Start your streak today</Text>
-                          )}
-                        </View>
-                      </View>
-                      <View style={styles.habitActions}>
-                        <TouchableOpacity
-                          style={[styles.actionBtn, isDone && styles.actionBtnDone]}
-                          activeOpacity={0.75}
-                          onPress={() => handleLogAction(habit, 'done')}
-                        >
-                          <Text style={[styles.actionBtnText, isDone && styles.actionBtnTextActive]}>✓</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[styles.actionBtn, isMissed && styles.actionBtnMissed]}
-                          activeOpacity={0.75}
-                          onPress={() => handleLogAction(habit, 'missed')}
-                        >
-                          <Text style={[styles.actionBtnText, isMissed && styles.actionBtnTextActive]}>✗</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={styles.iconBtn}
-                          activeOpacity={0.75}
-                          onPress={async () => {
-                            let savedNote = todayLog?.note || '';
-                            if (!savedNote) {
-                              try {
-                                const local = await AsyncStorage.getItem(`note_${habit._id}_${todayStr()}`);
-                                if (local) savedNote = local;
-                              } catch (_) { }
-                            }
-                            setNoteText(savedNote);
-                            setNoteModalHabit(habit);
-                            setShowNoteModal(true);
-                          }}
-                        >
-                          <Text style={styles.iconBtnText}>📝</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.iconBtn} activeOpacity={0.75} onPress={() => handleOpenReminder(habit)}>
-                          <Text style={styles.iconBtnText}>⏰</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.iconBtn} activeOpacity={0.75} onPress={() => navigation.navigate('Calendar', { habitId: habit._id })}>
-                          <Text style={styles.iconBtnText}>📅</Text>
-                        </TouchableOpacity>
-                        {/* Drag handle — hidden when only 1 habit */}
-                        {habits.length > 1 && (
-                          <TouchableOpacity
-                            onLongPress={drag}
-                            delayLongPress={100}
-                            style={styles.dragHandle}
-                            hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
-                          >
-                            <Text style={styles.dragHandleIcon}>≡</Text>
-                          </TouchableOpacity>
-                        )}
-                      </View>
+                <View style={styles.habitCard}>
+                  <View style={[styles.accentBar, { backgroundColor: habit.colorHex || colors.primary }]} />
+                  <View style={styles.habitMiddle}>
+                    <View style={styles.habitNameRow}>
+                      <Text style={styles.habitIcon}>{habit.icon}</Text>
+                      <Text style={styles.habitName} numberOfLines={1}>{habit.name}</Text>
+                      {habit.reminderEnabled && <Text style={styles.reminderBadge}>⏰</Text>}
                     </View>
-                  </ShadowDecorator>
-                </ScaleDecorator>
+                    <View style={styles.habitStreakRow}>
+                      {streak > 0 ? (
+                        <>
+                          <Text style={styles.streakFire}>🔥</Text>
+                          <Text style={styles.streakText}>{streak} day streak</Text>
+                        </>
+                      ) : (
+                        <Text style={styles.streakZero}>Start your streak today</Text>
+                      )}
+                    </View>
+                  </View>
+                  <View style={styles.habitActions}>
+                    <TouchableOpacity
+                      style={[styles.actionBtn, isDone && styles.actionBtnDone]}
+                      activeOpacity={0.75}
+                      onPress={() => handleLogAction(habit, 'done')}
+                    >
+                      <Text style={[styles.actionBtnText, isDone && styles.actionBtnTextActive]}>✓</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.actionBtn, isMissed && styles.actionBtnMissed]}
+                      activeOpacity={0.75}
+                      onPress={() => handleLogAction(habit, 'missed')}
+                    >
+                      <Text style={[styles.actionBtnText, isMissed && styles.actionBtnTextActive]}>✗</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.iconBtn}
+                      activeOpacity={0.75}
+                      onPress={async () => {
+                        let savedNote = todayLog?.note || '';
+                        if (!savedNote) {
+                          try {
+                            const local = await AsyncStorage.getItem(`note_${habit._id}_${todayStr()}`);
+                            if (local) savedNote = local;
+                          } catch (_) { }
+                        }
+                        setNoteText(savedNote);
+                        setNoteModalHabit(habit);
+                        setShowNoteModal(true);
+                      }}
+                    >
+                      <Text style={styles.iconBtnText}>📝</Text>
+                    </TouchableOpacity>
+                    {/* "..." overflow: opens a small action menu for ⏰ and 📅 */}
+                    <TouchableOpacity
+                      style={styles.iconBtn}
+                      activeOpacity={0.75}
+                      onPress={() => setOverflowHabit(habit)}
+                    >
+                      <Text style={[styles.iconBtnText, { letterSpacing: 1 }]}>•••</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
               );
             }}
           />
@@ -970,6 +945,61 @@ export default function DashboardScreen({ navigation }) {
       >
         <Text style={styles.fabText}>+</Text>
       </TouchableOpacity>
+
+      {/* ── Overflow ("•••") action menu ── */}
+      <Modal
+        visible={!!overflowHabit}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setOverflowHabit(null)}
+      >
+        <TouchableOpacity
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}
+          activeOpacity={1}
+          onPress={() => setOverflowHabit(null)}
+        >
+          <View style={{
+            backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20,
+            paddingTop: 8, paddingBottom: 36, paddingHorizontal: 20,
+          }}>
+            {/* Handle bar */}
+            <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginBottom: 16 }} />
+            <Text style={{ color: colors.textMuted, fontSize: 12, fontWeight: '600', marginBottom: 14, textTransform: 'uppercase', letterSpacing: 0.6 }}>
+              {overflowHabit?.name}
+            </Text>
+            <TouchableOpacity
+              style={{
+                flexDirection: 'row', alignItems: 'center', gap: 14,
+                paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border,
+              }}
+              activeOpacity={0.75}
+              onPress={() => { setOverflowHabit(null); setTimeout(() => handleOpenReminder(overflowHabit), 200); }}
+            >
+              <Text style={{ fontSize: 22 }}>⏰</Text>
+              <View>
+                <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600' }}>Set Reminder</Text>
+                <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>
+                  {overflowHabit?.reminderEnabled ? `Reminder at ${overflowHabit?.reminderTime}` : 'No reminder set'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{
+                flexDirection: 'row', alignItems: 'center', gap: 14,
+                paddingVertical: 14,
+              }}
+              activeOpacity={0.75}
+              onPress={() => { setOverflowHabit(null); setTimeout(() => navigation.navigate('Calendar', { habitId: overflowHabit?._id }), 200); }}
+            >
+              <Text style={{ fontSize: 22 }}>📅</Text>
+              <View>
+                <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600' }}>View Calendar</Text>
+                <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>See your full log history</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* ── Add Habit Modal ── */}
       <Modal

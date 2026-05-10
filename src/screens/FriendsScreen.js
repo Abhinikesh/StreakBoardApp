@@ -47,7 +47,7 @@ export default function FriendsScreen({ navigation }) {
   const { colors } = useTheme();
   const s = makeStyles(colors);
   const { isOnline } = useOffline();
-  if (!isOnline) return <OfflineWall colors={colors} label="Friends &amp; messaging require an internet connection." />;
+  // isOnline guard moved AFTER all hooks below (Rules of Hooks — no early return before hooks)
 
   const [shareData,    setShareData]    = useState({ shareCode: '', shareUrl: '', isProfilePublic: false });
   const [friends,      setFriends]      = useState([]);
@@ -267,6 +267,11 @@ export default function FriendsScreen({ navigation }) {
 
   const profileUrl = shareData.shareUrl || `${BASE_URL}/u/${shareData.shareCode}`;
 
+  // Offline guard — AFTER all hooks
+  if (!isOnline) {
+    return <OfflineWall colors={colors} label="Friends & messaging require an internet connection." />;
+  }
+
   if (loading) {
     return <View style={s.center}><ActivityIndicator size="large" color={colors.primary} /></View>;
   }
@@ -459,8 +464,31 @@ export default function FriendsScreen({ navigation }) {
 
       {/* ── Challenges Tab ── */}
       {activeTab === 'challenges' && (
-        <ScrollView style={[s.scroll, {position:'absolute',top:0,left:0,right:0,bottom:0,backgroundColor:colors.bg}]}
-          contentContainerStyle={[s.content,{paddingTop:80}]}
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.bg }}>
+          {/* Back header */}
+          <View style={{
+            flexDirection: 'row', alignItems: 'center',
+            paddingHorizontal: 16, paddingTop: 14, paddingBottom: 12,
+            borderBottomWidth: 1, borderBottomColor: colors.border,
+            backgroundColor: colors.bg,
+          }}>
+            <TouchableOpacity
+              onPress={() => setActiveTab('friends')}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              style={{
+                width: 36, height: 36, borderRadius: 18,
+                backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
+                alignItems: 'center', justifyContent: 'center', marginRight: 12,
+              }}
+            >
+              <Text style={{ color: colors.primary, fontSize: 18, fontWeight: '700' }}>←</Text>
+            </TouchableOpacity>
+            <Text style={{ color: colors.textPrimary, fontSize: 17, fontWeight: '800', flex: 1 }}>
+              ⚔️ Challenges
+            </Text>
+          </View>
+          <ScrollView
+          contentContainerStyle={[s.content, { paddingTop: 16 }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary}/>}>
           {challenges.length === 0 ? (
             <View style={s.emptyFriends}>
@@ -531,7 +559,8 @@ export default function FriendsScreen({ navigation }) {
               </View>
             );
           })}
-        </ScrollView>
+          </ScrollView>
+        </View>
       )}
 
       {/* ── Create Challenge Modal ── */}

@@ -398,7 +398,8 @@ export default function LeaderboardScreen({ navigation }) {
   const { colors } = useTheme();
   const s = makeStyles(colors);
   const { isOnline } = useOffline();
-  if (!isOnline) return <OfflineWall colors={colors} onBack={() => navigation.goBack()} label="Leaderboard requires an internet connection." />;
+  // NOTE: isOnline check is done AFTER all hooks (see below) to comply with Rules of Hooks.
+  // Placing an early return before hooks would cause a "rendered fewer hooks" crash.
 
   const [entries,    setEntries]    = useState([]);
   const [myId,       setMyId]       = useState(null);
@@ -654,6 +655,11 @@ export default function LeaderboardScreen({ navigation }) {
   const activeCount   = sorted.filter((e) => e.currentStreak > 0).length;
   const inactiveCount = sorted.length - activeCount;
 
+  // Offline guard — must be placed AFTER all hooks (Rules of Hooks)
+  if (!isOnline) {
+    return <OfflineWall colors={colors} onBack={() => navigation.goBack()} label="Leaderboard requires an internet connection." />;
+  }
+
   if (loading) {
     return <View style={s.center}><ActivityIndicator size="large" color={colors.primary} /></View>;
   }
@@ -763,7 +769,7 @@ export default function LeaderboardScreen({ navigation }) {
                       <Text style={[s.seasonRowSub, { color: colors.textMuted }]}>Lv.{entry.currentLevel || 1}</Text>
                     </View>
                     <View style={[s.streakBadge, { backgroundColor: colors.primary + '18', borderColor: colors.primary + '33' }]}>
-                      <Text style={[s.streakBadgeTxt, { color: colors.primary }]}>{entry.bestStreak} 🔥</Text>
+                      <Text style={[s.streakBadgeTxt, { color: colors.primary }]}>{(entry.bestStreak ?? entry.currentStreak ?? entry.streak ?? 0)} 🔥</Text>
                     </View>
                   </TouchableOpacity>
                 );
