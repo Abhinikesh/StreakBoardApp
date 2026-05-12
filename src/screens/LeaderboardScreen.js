@@ -415,6 +415,7 @@ export default function LeaderboardScreen({ navigation }) {
   const [currentSeason,  setCurrentSeason]  = useState(null);
   const [seasonEntries,  setSeasonEntries]  = useState([]);
   const [mySeasonRank,   setMySeasonRank]   = useState(null);
+  const [fetchError,     setFetchError]     = useState(null);  // non-null = API failure message
 
   // ── Animation refs ─────────────────────────────────────────────────────
   // podiumEntr[0]=3rd, [1]=1st, [2]=2nd (stagger order per spec)
@@ -433,6 +434,7 @@ export default function LeaderboardScreen({ navigation }) {
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
+    setFetchError(null);  // clear any previous error before re-fetching
     try {
       const [lbRes, meRes, seasonRes, seasonLbRes, myRankRes] = await Promise.all([
         api.get('/api/social/leaderboard'),
@@ -456,7 +458,9 @@ export default function LeaderboardScreen({ navigation }) {
       setSeasonEntries(Array.isArray(seasonLbRes.data) ? seasonLbRes.data : []);
       if (myRankRes.data)  setMySeasonRank(myRankRes.data);
     } catch (err) {
-      console.error('[Leaderboard] fetchAll error:', err.message);
+      const msg = err?.response?.data?.message || err?.message || 'Could not reach the server.';
+      console.error('[Leaderboard] fetchAll error:', msg);
+      setFetchError(msg);
       setEntries([]);
       setSeasonEntries([]);
     } finally {
@@ -620,7 +624,7 @@ export default function LeaderboardScreen({ navigation }) {
       console.error('[renderListItem] error:', e.message);
       return null;
     }
-  }, [visibleSorted, filter, tab, comebackStatus, colors, myId]);
+  }, [visibleSorted, filter, tab, comebackStatus, colors, myId, navigateToProfile]);
 
   const keyExtractor = useCallback((item) =>
     item.type === 'divider' ? 'inactive-sep' : (item.entry?._id || item.entry?.id || 'unknown'),
@@ -662,6 +666,28 @@ export default function LeaderboardScreen({ navigation }) {
 
   if (loading) {
     return <View style={s.center}><ActivityIndicator size="large" color={colors.primary} /></View>;
+  }
+
+  // ── Fetch error: show a friendly message + retry instead of a blank screen ──
+  if (fetchError && entries.length === 0) {
+    return (
+      <View style={[s.center, { paddingHorizontal: 32 }]}>
+        <Text style={{ fontSize: 44, textAlign: 'center', marginBottom: 16 }}>⚠️</Text>
+        <Text style={{ color: colors.textPrimary, fontSize: 17, fontWeight: '700', textAlign: 'center', marginBottom: 8 }}>
+          Could not load leaderboard
+        </Text>
+        <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: 'center', marginBottom: 28, lineHeight: 19 }}>
+          {fetchError}
+        </Text>
+        <TouchableOpacity
+          onPress={fetchAll}
+          style={{ backgroundColor: colors.primary, borderRadius: 14, paddingVertical: 13, paddingHorizontal: 32 }}
+          activeOpacity={0.85}
+        >
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>🔄  Try Again</Text>
+        </TouchableOpacity>
+      </View>
+    );
   }
 
   return (
@@ -847,7 +873,7 @@ export default function LeaderboardScreen({ navigation }) {
         ) : (
           <>
             {/* ── Top-3 Podium (only shown with ≥ 3 visible users) ── */}
-            {podiumEntries.length >= 3 && (
+            {podiumEntries.length >= 3 && podiumEntries.every(Boolean) && (
               <View style={s.podiumCard}>
                 {/* Order: 2nd, 1st, 3rd — pass animation refs so PodiumCard doesn't crash */}
                 <PodiumCard

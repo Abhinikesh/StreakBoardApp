@@ -66,6 +66,7 @@ export default function FriendsScreen({ navigation }) {
   const [habitInput,      setHabitInput]    = useState('');
   const [myHabits,        setMyHabits]      = useState([]);
   const [sending,         setSending]       = useState(false);
+  const [friendRequests,  setFriendRequests] = useState([]);  // incoming pending requests
 
   // ── Fetch share info ────────────────────────────────────────────────────────
   const fetchShareData = useCallback(async () => {
@@ -90,16 +91,24 @@ export default function FriendsScreen({ navigation }) {
     } catch (_) {}
   }, []);
 
+  // ── Fetch incoming friend requests ───────────────────────────────────────
+  const fetchFriendRequests = useCallback(async () => {
+    try {
+      const res = await api.get('/api/social/friend-requests');
+      setFriendRequests(Array.isArray(res.data) ? res.data : []);
+    } catch (_) {}
+  }, []);
+
   const fetchAll = useCallback(async () => {
-    await Promise.all([fetchShareData(), fetchFriends(), fetchChallenges()]);
-  }, [fetchShareData, fetchFriends, fetchChallenges]);
+    await Promise.all([fetchShareData(), fetchFriends(), fetchChallenges(), fetchFriendRequests()]);
+  }, [fetchShareData, fetchFriends, fetchChallenges, fetchFriendRequests]);
 
   useEffect(() => {
     (async () => { setLoading(true); await fetchAll(); setLoading(false); })();
   }, [fetchAll]);
 
   // Reload friends every time the tab is focused
-  useFocusEffect(useCallback(() => { fetchFriends(); fetchChallenges(); }, [fetchFriends, fetchChallenges]));
+  useFocusEffect(useCallback(() => { fetchFriends(); fetchChallenges(); fetchFriendRequests(); }, [fetchFriends, fetchChallenges, fetchFriendRequests]));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true); await fetchAll(); setRefreshing(false);
@@ -129,26 +138,46 @@ export default function FriendsScreen({ navigation }) {
     }
   }, [friendCode, navigation]);
 
-  // ── Add friend by share code ────────────────────────────────────────────────
-  const handleAddFriend = useCallback(async () => {
+  // ── Send a friend request by share code ────────────────────────────────────
+  const handleSendRequest = useCallback(async () => {
     const code = friendCode.trim();
-    if (!code) {
-      Alert.alert('', 'Please enter a share code first.');
-      return;
-    }
+    if (!code) { Alert.alert('', 'Please enter a share code first.'); return; }
     setAddingFriend(true);
     try {
-      await api.post('/api/social/friends/add', { shareCode: code });
+      // Resolve shareCode → userId, then POST the request
+      const profileRes = await api.get(`/api/social/u/${code}`);
+      const targetId = profileRes.data?._id;
+      if (!targetId) throw new Error('Could not find that user.');
+      await api.post('/api/social/friend-requests', { targetUserId: targetId });
       setFriendCode('');
-      await fetchFriends();
-      Alert.alert('✅ Friend added!', 'They now appear in your friends list.');
+      Alert.alert('✅ Request Sent!', "They'll get a notification and can accept your request.");
     } catch (e) {
-      const msg = e.response?.data?.message || 'Could not add friend. Make sure their profile is public.';
+      const msg = e.response?.data?.message || e.message || 'Could not send request. Make sure the profile is public.';
       Alert.alert('Error', msg);
-    } finally {
-      setAddingFriend(false);
+    } finally { setAddingFriend(false); }
+  }, [friendCode]);
+
+  // ── Accept / decline incoming friend requests ───────────────────────────────
+  const handleAcceptFriendReq = useCallback(async (req) => {
+    try {
+      await api.patch(`/api/social/friend-requests/${req._id}/accept`);
+      setFriendRequests(prev => prev.filter(r => r._id !== req._id));
+      await fetchFriends();
+      Alert.alert('🎉 Now Friends!', `You and ${req.senderName || 'them'} are now friends.`);
+    } catch (e) {
+      Alert.alert('Error', e?.response?.data?.message || 'Could not accept.');
     }
-  }, [friendCode, fetchFriends]);
+  }, [fetchFriends]);
+
+  const handleDeclineFriendReq = useCallback(async (req) => {
+    try {
+      await api.patch(`/api/social/friend-requests/${req._id}/decline`);
+      setFriendRequests(prev => prev.filter(r => r._id !== req._id));
+    } catch (e) {
+      Alert.alert('Error', e?.response?.data?.message || 'Could not decline.');
+    }
+  }, []);
+
 
   const handleCopy = useCallback(async () => {
     const url = shareData.shareUrl || `${BASE_URL}/u/${shareData.shareCode}`;
@@ -378,11 +407,11 @@ export default function FriendsScreen({ navigation }) {
             </TouchableOpacity>
             <TouchableOpacity
               style={[s.addBtn, addingFriend && { opacity: 0.6 }]}
-              onPress={handleAddFriend}
+              onPress={handleSendRequest}
               disabled={addingFriend}
               activeOpacity={0.85}
             >
-              <Text style={s.addBtnText}>+ Add Friend</Text>
+              <Text style={s.addBtnText}>{addingFriend ? 'Sending...' : '👤 Send Request'}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -406,7 +435,36 @@ export default function FriendsScreen({ navigation }) {
           </View>
         ) : null}
 
-        {/* ── Friends list ── */}
+        {/* ── Friend Requests Inbox ── */}
+        {friendRequests.length > 0 && (
+          <View style={s.card}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+              <Text style={s.cardTitle}>Friend Requests</Text>
+              <View style={{ backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, marginLeft: 8 }}>
+                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>{friendRequests.length}</Text>
+              </View>
+            </View>
+            {friendRequests.map((req, idx) => (
+              <View key={req._id} style={[s.requestRow, idx < friendRequests.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.border }]}>
+                <AvatarCircle user={{ name: req.senderName, avatar: req.senderAvatar }} size={44} />
+                <View style={s.requestInfo}>
+                  <Text style={s.friendName} numberOfLines={1}>{req.senderName || 'Someone'}</Text>
+                  <Text style={s.friendSub}>wants to be friends</Text>
+                </View>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TouchableOpacity style={s.reqAcceptBtn} onPress={() => handleAcceptFriendReq(req)} activeOpacity={0.85}>
+                    <Text style={s.reqAcceptTxt}>✓</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={s.reqDeclineBtn} onPress={() => handleDeclineFriendReq(req)} activeOpacity={0.85}>
+                    <Text style={s.reqDeclineTxt}>✗</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* ── Friends list ── */}}
         <View style={s.card}>
           <Text style={[s.cardTitle, { marginBottom: 12 }]}>
             Friends {friends.length > 0 ? `(${friends.length})` : ''}
@@ -416,7 +474,7 @@ export default function FriendsScreen({ navigation }) {
             <View style={s.emptyFriends}>
               <Text style={s.emptyEmoji}>👥</Text>
               <Text style={s.emptyTitle}>No friends yet</Text>
-              <Text style={s.emptySub}>Enter a share code above and tap "+ Add Friend"</Text>
+              <Text style={s.emptySub}>Enter a share code above to send a friend request</Text>
             </View>
           ) : (
             friends.map((friend) => (
@@ -708,4 +766,11 @@ const makeStyles = (colors) => StyleSheet.create({
   sendBtnTxt:    { color: '#fff', fontWeight: '800', fontSize: 15 },
   cancelBtn:     { alignItems: 'center', paddingVertical: 10 },
   cancelBtnTxt:  { color: colors.textMuted, fontSize: 14 },
+  // Friend request inbox rows
+  requestRow:    { flexDirection: 'row', alignItems: 'center', paddingVertical: 11 },
+  requestInfo:   { flex: 1, marginLeft: 12 },
+  reqAcceptBtn:  { width: 36, height: 36, borderRadius: 10, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  reqAcceptTxt:  { color: '#fff', fontSize: 18, fontWeight: '700' },
+  reqDeclineBtn: { width: 36, height: 36, borderRadius: 10, borderWidth: 1.5, borderColor: colors.danger || '#ef4444', alignItems: 'center', justifyContent: 'center' },
+  reqDeclineTxt: { color: colors.danger || '#ef4444', fontSize: 18, fontWeight: '700' },
 });

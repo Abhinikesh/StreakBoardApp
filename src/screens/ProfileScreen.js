@@ -19,6 +19,7 @@ import {
   getReminderSettings,
 } from '../lib/notifications';
 import { getComebackStatus, updateBestStreak } from '../lib/comeback';
+import { useUserProfile } from '../context/UserProfileContext';
 
 import { WEB_BASE } from '../config/api';
 
@@ -42,6 +43,7 @@ function computeBestStreak(logs) {
 
 export default function ProfileScreen({ navigation }) {
   const { colors, isDark, themeMode, setThemeMode, toggleTheme, accentKey, setAccentKey } = useTheme();
+  const { profileCache, updateProfileCache } = useUserProfile();
   const s = makeStyles(colors);
 
   const [profile, setProfile] = useState({ name: '', email: '', createdAt: '', avatar: '' });
@@ -82,6 +84,14 @@ export default function ProfileScreen({ navigation }) {
       setEditName(p.name || '');
       if (p.avatar) setAvatarUri(p.avatar);
       setShareData(shareRes.data || {});
+      // Seed the shared profile cache so EditProfileScreen can write back instantly
+      updateProfileCache({
+        name:        p.name        || '',
+        bio:         p.bio         || '',
+        bannerColor: p.bannerColor || '#7C3AED',
+        pinnedBadge: p.pinnedBadge?.icon ? p.pinnedBadge : null,
+        avatar:      p.avatar      || null,
+      });
       if (xpRes.data) setXpData(xpRes.data);
       if (shieldRes.data) setShieldData(shieldRes.data);
       // seasonBadges live on the User doc, already fetched via /api/user/profile
@@ -130,6 +140,7 @@ export default function ProfileScreen({ navigation }) {
     try {
       await api.put('/api/auth/me', { name: editName.trim() });
       setProfile((p) => ({ ...p, name: editName.trim() }));
+      updateProfileCache({ name: editName.trim() });
       setEditMode(false);
     } catch (err) {
       Alert.alert('Error', err.response?.data?.message || 'Failed to update name.');
@@ -356,8 +367,12 @@ export default function ProfileScreen({ navigation }) {
   };
 
 
-  const avatarBg = getAvatarColor(profile.name);
-  const initial = profile.name ? profile.name[0].toUpperCase() : '?';
+  // Merge cache over fetched profile. EditProfileScreen writes to profileCache
+  // right after a successful save, so this screen updates without a re-fetch.
+  const eff = profileCache ? { ...profile, ...profileCache } : profile;
+
+  const avatarBg = getAvatarColor(eff.name);
+  const initial = eff.name ? eff.name[0].toUpperCase() : '?';
   const memberSince = profile.createdAt
     ? new Date(profile.createdAt).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
     : 'April 2026';
@@ -374,7 +389,7 @@ export default function ProfileScreen({ navigation }) {
         keyboardShouldPersistTaps="handled">
 
         {/* ── Banner color strip ── */}
-        <View style={[s.profileBanner, { backgroundColor: profile.bannerColor || '#7C3AED' }]} />
+        <View style={[s.profileBanner, { backgroundColor: eff.bannerColor || '#7C3AED' }]} />
 
         {/* Avatar + name */}
         <View style={s.avatarSection}>
@@ -429,7 +444,7 @@ export default function ProfileScreen({ navigation }) {
             </View>
           ) : (
             <View style={s.nameRow}>
-              <Text style={s.profileName}>{profile.name || 'Your Name'}</Text>
+              <Text style={s.profileName}>{eff.name || 'Your Name'}</Text>
               <TouchableOpacity onPress={() => setEditMode(true)} activeOpacity={0.7} style={s.editIcon}>
                 <Text style={s.editIconTxt}>✏️</Text>
               </TouchableOpacity>
@@ -438,16 +453,16 @@ export default function ProfileScreen({ navigation }) {
           <Text style={s.profileEmail}>{profile.email}</Text>
 
           {/* Bio */}
-          {!!profile.bio && (
-            <Text style={s.profileBio}>{profile.bio}</Text>
+          {!!eff.bio && (
+            <Text style={s.profileBio}>{eff.bio}</Text>
           )}
 
           {/* Pinned badge */}
-          {profile.pinnedBadge?.icon ? (
+          {eff.pinnedBadge?.icon ? (
             <View style={s.pinnedBadge}>
-              <Text style={s.pinnedBadgeIcon}>{profile.pinnedBadge.icon}</Text>
+              <Text style={s.pinnedBadgeIcon}>{eff.pinnedBadge.icon}</Text>
               <Text style={[s.pinnedBadgeTxt, { color: colors.primary }]}>
-                {profile.pinnedBadge.label}
+                {eff.pinnedBadge.label}
               </Text>
             </View>
           ) : null}

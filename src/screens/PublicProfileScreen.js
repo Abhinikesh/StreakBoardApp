@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, Image,
-  StatusBar, Animated, Easing, ActivityIndicator,
+  StatusBar, Animated, Easing, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
@@ -100,6 +100,9 @@ export default function PublicProfileScreen({ route, navigation }) {
   const [error,    setError]    = useState(null);
   const [ready,    setReady]    = useState(false);
   const [toast,    setToast]    = useState(false);
+  // status: 'loading'|'none'|'pending_sent'|'pending_received'|'friends'|'own'
+  const [friendStatus, setFriendStatus] = useState({ status: 'loading', requestId: null });
+  const [friendBusy,   setFriendBusy]   = useState(false);
 
   const fetchProfile = useCallback(async () => {
     // Need either a shareCode or a userId to fetch
@@ -160,6 +163,81 @@ export default function PublicProfileScreen({ route, navigation }) {
   }, [shareCode, userId]);
 
   useEffect(() => { fetchProfile(); }, [fetchProfile]);
+
+  // ── Fetch friendship status with this user ──────────────────────────────
+  const fetchFriendStatus = useCallback(async () => {
+    if (!userId) return;
+    try {
+      const res = await api.get(`/api/social/friend-status/${userId}`);
+      const { status = 'none', requestId = null } = res.data || {};
+      setFriendStatus({ status, requestId });
+    } catch (e) {
+      // 400 = own profile; hide button
+      setFriendStatus({ status: e?.response?.status === 400 ? 'own' : 'none', requestId: null });
+    }
+  }, [userId]);
+
+  useEffect(() => { fetchFriendStatus(); }, [fetchFriendStatus]);
+
+  // ── Friend action handlers ────────────────────────────────────────
+  const handleSendRequest = useCallback(async () => {
+    setFriendBusy(true);
+    try {
+      await api.post('/api/social/friend-requests', { targetUserId: userId });
+      await fetchFriendStatus();
+    } catch (e) {
+      Alert.alert('Error', e?.response?.data?.message || 'Could not send request.');
+    } finally { setFriendBusy(false); }
+  }, [userId, fetchFriendStatus]);
+
+  const handleCancelRequest = useCallback(async () => {
+    setFriendBusy(true);
+    try {
+      if (friendStatus.requestId) {
+        await api.delete(`/api/social/friend-requests/${friendStatus.requestId}`);
+      } else {
+        await api.post('/api/social/friend-requests/cancel', { targetUserId: userId });
+      }
+      setFriendStatus({ status: 'none', requestId: null });
+    } catch (e) {
+      Alert.alert('Error', e?.response?.data?.message || 'Could not cancel request.');
+    } finally { setFriendBusy(false); }
+  }, [friendStatus.requestId, userId]);
+
+  const handleAcceptRequest = useCallback(async () => {
+    setFriendBusy(true);
+    try {
+      await api.patch(`/api/social/friend-requests/${friendStatus.requestId}/accept`);
+      setFriendStatus({ status: 'friends', requestId: null });
+    } catch (e) {
+      Alert.alert('Error', e?.response?.data?.message || 'Could not accept request.');
+    } finally { setFriendBusy(false); }
+  }, [friendStatus.requestId]);
+
+  const handleDeclineRequest = useCallback(async () => {
+    setFriendBusy(true);
+    try {
+      await api.patch(`/api/social/friend-requests/${friendStatus.requestId}/decline`);
+      setFriendStatus({ status: 'none', requestId: null });
+    } catch (e) {
+      Alert.alert('Error', e?.response?.data?.message || 'Could not decline.');
+    } finally { setFriendBusy(false); }
+  }, [friendStatus.requestId]);
+
+  const handleUnfriend = useCallback(() => {
+    Alert.alert('Unfriend', `Remove ${displayName} from your friends?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Unfriend', style: 'destructive', onPress: async () => {
+        setFriendBusy(true);
+        try {
+          await api.delete(`/api/social/friends/${userId}`);
+          setFriendStatus({ status: 'none', requestId: null });
+        } catch (e) {
+          Alert.alert('Error', e?.response?.data?.message || 'Could not unfriend.');
+        } finally { setFriendBusy(false); }
+      }},
+    ]);
+  }, [displayName, userId]);
 
   // Derived stats — always use optional chaining, never direct access
   const p  = profile || {};
@@ -321,6 +399,56 @@ export default function PublicProfileScreen({ route, navigation }) {
                 <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>{p.pinnedBadge.label}</Text>
               </View>
             ) : null}
+
+            {/* ── Friend Request Button ── */}
+            {userId && friendStatus.status !== 'own' && (
+              <View style={{ marginTop: 18, alignSelf: 'stretch' }}>
+                {friendStatus.status === 'loading' ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : friendStatus.status === 'friends' ? (
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary + '18', borderWidth: 1.5, borderColor: colors.primary + '55', borderRadius: 14, paddingVertical: 12 }}>
+                      <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 14 }}>✓ Friends</Text>
+                    </View>
+                    <TouchableOpacity onPress={handleUnfriend} disabled={friendBusy} activeOpacity={0.8}
+                      style={{ backgroundColor: colors.card, borderWidth: 1.5, borderColor: colors.border, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 16 }}>
+                      <Text style={{ color: colors.textMuted, fontSize: 13 }}>Unfriend</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : friendStatus.status === 'pending_sent' ? (
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.card, borderWidth: 1.5, borderColor: colors.border, borderRadius: 14, paddingVertical: 12 }}>
+                      <Text style={{ color: colors.textMuted, fontSize: 14, fontWeight: '600' }}>⏳ Request Sent</Text>
+                    </View>
+                    <TouchableOpacity onPress={handleCancelRequest} disabled={friendBusy} activeOpacity={0.8}
+                      style={{ borderWidth: 1.5, borderColor: colors.danger || '#ef4444', borderRadius: 14, paddingVertical: 12, paddingHorizontal: 14 }}>
+                      <Text style={{ color: colors.danger || '#ef4444', fontSize: 13, fontWeight: '600' }}>Cancel</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : friendStatus.status === 'pending_received' ? (
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TouchableOpacity onPress={handleAcceptRequest} disabled={friendBusy} activeOpacity={0.85}
+                      style={{ flex: 1, backgroundColor: colors.primary, borderRadius: 14, paddingVertical: 13, alignItems: 'center' }}>
+                      {friendBusy
+                        ? <ActivityIndicator size="small" color="#fff" />
+                        : <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>✓ Accept</Text>}
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={handleDeclineRequest} disabled={friendBusy} activeOpacity={0.8}
+                      style={{ flex: 1, borderWidth: 1.5, borderColor: colors.danger || '#ef4444', borderRadius: 14, paddingVertical: 13, alignItems: 'center' }}>
+                      <Text style={{ color: colors.danger || '#ef4444', fontWeight: '600', fontSize: 14 }}>✗ Decline</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <TouchableOpacity onPress={handleSendRequest} disabled={friendBusy} activeOpacity={0.85}
+                    style={{ backgroundColor: colors.primary, borderRadius: 14, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8,
+                      shadowColor: colors.primary, shadowOpacity: 0.35, shadowRadius: 10, elevation: 5 }}>
+                    {friendBusy
+                      ? <ActivityIndicator size="small" color="#fff" />
+                      : <><Text style={{ fontSize: 16 }}>👤</Text><Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Send Friend Request</Text></>}
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
           </View>
         </View>
 

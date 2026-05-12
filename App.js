@@ -6,6 +6,7 @@ import * as Notifications from 'expo-notifications';
 import AppNavigator from './src/navigation/AppNavigator';
 import { ThemeProvider } from './src/context/ThemeContext';
 import { OfflineProvider } from './src/context/OfflineContext';
+import { UserProfileProvider } from './src/context/UserProfileContext';
 import { preloadSounds, unloadSounds } from './src/lib/sound';
 import { checkReEngagement } from './src/lib/reengagement';
 import { markInstallDate } from './src/lib/reviewPrompt';
@@ -45,10 +46,12 @@ export default function App() {
   return (
     <ThemeProvider>
       <OfflineProvider>
-        <SafeAreaProvider>
-          <StatusBar style="light" />
-          <AppNavigator />
-        </SafeAreaProvider>
+        <UserProfileProvider>
+          <SafeAreaProvider>
+            <StatusBar style="light" />
+            <AppNavigator />
+          </SafeAreaProvider>
+        </UserProfileProvider>
       </OfflineProvider>
     </ThemeProvider>
   );

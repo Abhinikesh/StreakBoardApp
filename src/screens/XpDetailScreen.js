@@ -1,59 +1,72 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  Animated, ActivityIndicator, StatusBar,
+  Animated as RNAnimated, ActivityIndicator, StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Svg, { Circle } from 'react-native-svg';
+import Animated, {
+  useSharedValue, useAnimatedProps, withTiming, Easing,
+} from 'react-native-reanimated';
 import { useTheme } from '../context/ThemeContext';
 import api from '../lib/axios';
 import { getLevelInfo, getLevelIcon, LEVELS, XP_RULES } from '../lib/xpLevels';
 
-// ── Circular progress ring ────────────────────────────────────────────────────
-function CircularRing({ progress = 0, size = 180, stroke = 16, color = '#7c3aed' }) {
-  const half    = size / 2;
-  const clamp   = Math.max(0, Math.min(1, progress));
-  const rotate1 = clamp > 0.5 ? 180 : clamp * 360;
-  const rotate2 = clamp > 0.5 ? (clamp - 0.5) * 360 : 0;
-  const bg      = 'rgba(255,255,255,0.06)';
+// ── SVG constants ─────────────────────────────────────────────────────────────
+const SVG_SIZE       = 200;
+const RING_RADIUS    = 85;
+const STROKE_WIDTH   = 14;
+const CIRCUMFERENCE  = 2 * Math.PI * RING_RADIUS;  // ≈ 534.07
+const TRACK_COLOR    = 'rgba(255,255,255,0.08)';
+
+// AnimatedCircle: ties react-native-svg's Circle to Reanimated's shared values
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+
+// ── Circular progress ring (SVG — mathematically exact) ──────────────────────
+function CircularRing({ progress = 0, color = '#FF6B6B' }) {
+  // strokeDashoffset drives the visible arc:
+  //   offset = CIRCUMFERENCE       → 0 % filled  (invisible arc)
+  //   offset = 0                   → 100% filled  (full circle)
+  const offset = useSharedValue(CIRCUMFERENCE);
+
+  useEffect(() => {
+    const clamped = Math.max(0, Math.min(1, progress));
+    offset.value = withTiming(CIRCUMFERENCE * (1 - clamped), {
+      duration: 450,
+      easing: Easing.out(Easing.quad),
+    });
+  }, [progress]);
+
+  const animatedProps = useAnimatedProps(() => ({
+    strokeDashoffset: offset.value,
+  }));
 
   return (
-    <View style={{ width: size, height: size }}>
-      {/* Background ring */}
-      <View style={{
-        position: 'absolute', width: size, height: size,
-        borderRadius: half, borderWidth: stroke, borderColor: bg,
-      }} />
-
-      {/* Right half (always visible, rotated by first portion) */}
-      <View style={{
-        position: 'absolute', width: half, height: size,
-        overflow: 'hidden', right: 0,
-      }}>
-        <View style={{
-          position: 'absolute', width: size, height: size,
-          borderRadius: half, borderWidth: stroke, borderColor: color,
-          right: 0,
-          transform: [{ rotate: `${rotate1}deg` }],
-          transformOrigin: `${-half + stroke / 2}px ${half}px`,
-        }} />
-      </View>
-
-      {/* Left half (only visible when > 50%) */}
-      {clamp > 0.5 && (
-        <View style={{
-          position: 'absolute', width: half, height: size,
-          overflow: 'hidden', left: 0,
-        }}>
-          <View style={{
-            position: 'absolute', width: size, height: size,
-            borderRadius: half, borderWidth: stroke, borderColor: color,
-            left: 0,
-            transform: [{ rotate: `${rotate2}deg` }],
-            transformOrigin: `${half + stroke / 2}px ${half}px`,
-          }} />
-        </View>
-      )}
-    </View>
+    <Svg
+      width={SVG_SIZE}
+      height={SVG_SIZE}
+      viewBox={`0 0 ${SVG_SIZE} ${SVG_SIZE}`}
+    >
+      {/* Background track — full circle */}
+      <Circle
+        cx={100} cy={100} r={RING_RADIUS}
+        stroke={TRACK_COLOR}
+        strokeWidth={STROKE_WIDTH}
+        fill="none"
+      />
+      {/* Progress arc — starts at top via rotation offset applied to origin */}
+      <AnimatedCircle
+        cx={100} cy={100} r={RING_RADIUS}
+        stroke={color}
+        strokeWidth={STROKE_WIDTH}
+        fill="none"
+        strokeDasharray={CIRCUMFERENCE}
+        animatedProps={animatedProps}
+        strokeLinecap="round"
+        rotation={-90}
+        origin={`${SVG_SIZE / 2}, ${SVG_SIZE / 2}`}
+      />
+    </Svg>
   );
 }
 
@@ -109,7 +122,9 @@ export default function XpDetailScreen({ navigation, route }) {
   const [xpData,   setXpData]   = useState(route?.params?.xpData || null);
   const [history,  setHistory]  = useState([]);
   const [loading,  setLoading]  = useState(!route?.params?.xpData);
-  const barAnim = useRef(new Animated.Value(0)).current;
+
+  // RN Animated for the bar fill (kept separate from Reanimated)
+  const barAnim = useRef(new RNAnimated.Value(0)).current;
 
   const fetchData = useCallback(async () => {
     try {
@@ -126,8 +141,10 @@ export default function XpDetailScreen({ navigation, route }) {
 
   useEffect(() => {
     if (!xpData) return;
-    Animated.timing(barAnim, {
-      toValue: xpData.progress || 0,
+    // Derive progress locally from totalXp — guaranteed to match labels shown below
+    const { progress } = getLevelInfo(xpData.totalXp || 0);
+    RNAnimated.timing(barAnim, {
+      toValue: progress,
       duration: 900,
       useNativeDriver: false,
     }).start();
@@ -141,9 +158,15 @@ export default function XpDetailScreen({ navigation, route }) {
     );
   }
 
-  const { current, next } = getLevelInfo(xpData.totalXp || 0);
-  const pct = Math.round((xpData.progress || 0) * 100);
+  // ── Derive all display values from totalXp locally (not from API's progress field)
+  // so the ring, bar, and labels are always in perfect sync.
+  const totalXp = xpData.totalXp || 0;
+  const { current, next, xpIntoLevel, xpNeeded, progress } = getLevelInfo(totalXp);
+  const pct  = next ? Math.round((xpIntoLevel / xpNeeded) * 100) : 100;
   const icon = getLevelIcon(current.level);
+
+  // Accent color: use coral (#FF6B6B) if theme primary is purple-ish, else theme primary
+  const ringColor = '#FF6B6B';
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]} edges={['top']}>
@@ -154,7 +177,7 @@ export default function XpDetailScreen({ navigation, route }) {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Text style={[styles.backArrow, { color: colors.textPrimary }]}>‹</Text>
         </TouchableOpacity>
-        <Text style={[styles.navTitle, { color: colors.textPrimary }]}>XP & Levels</Text>
+        <Text style={[styles.navTitle, { color: colors.textPrimary }]}>XP &amp; Levels</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -163,28 +186,34 @@ export default function XpDetailScreen({ navigation, route }) {
         {/* ── Hero: circular ring + level name ── */}
         <View style={styles.hero}>
           <View style={styles.ringWrap}>
-            <CircularRing progress={xpData.progress || 0} color={colors.primary} />
-            {/* Center content */}
+            <CircularRing progress={progress} color={ringColor} />
+            {/* Center content — absolutely positioned inside the SVG area */}
             <View style={styles.ringCenter}>
               <Text style={{ fontSize: 36 }}>{icon}</Text>
-              <Text style={[styles.heroLevel, { color: colors.primary }]}>Lv.{current.level}</Text>
+              <Text style={[styles.heroLevel, { color: ringColor }]}>Lv.{current.level}</Text>
               <Text style={[styles.heroName, { color: colors.textPrimary }]}>{current.name}</Text>
             </View>
           </View>
 
-          <Text style={[styles.pctText, { color: colors.textMuted }]}>{pct}% to {next?.name ?? 'Max'}</Text>
+          {/* Percentage label */}
+          <Text style={[styles.pctText, { color: colors.textMuted }]}>
+            {pct}% to {next?.name ?? 'Max Level'}
+          </Text>
 
-          {/* XP bar */}
+          {/* XP bar — mirrors the ring visually */}
           <View style={[styles.barTrack, { backgroundColor: colors.border, marginTop: 8 }]}>
-            <Animated.View style={[styles.barFill, {
-              backgroundColor: colors.primary,
+            <RNAnimated.View style={[styles.barFill, {
+              backgroundColor: ringColor,
               width: barAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
             }]} />
           </View>
 
+          {/* Dynamic XP summary */}
           <Text style={[styles.xpLabel, { color: colors.textSecondary }]}>
-            {(xpData.totalXp || 0).toLocaleString()} XP total
-            {next && ` · ${xpData.xpToNext.toLocaleString()} to Level ${next.level}`}
+            {totalXp.toLocaleString()} XP total
+            {next
+              ? `  ·  ${(xpNeeded - xpIntoLevel).toLocaleString()} XP to Level ${next.level}`
+              : '  ·  Max level reached 🏆'}
           </Text>
         </View>
 
@@ -195,7 +224,7 @@ export default function XpDetailScreen({ navigation, route }) {
             <View key={i} style={[styles.ruleRow, i < XP_RULES.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.border }]}>
               <Text style={{ fontSize: 18, width: 28 }}>{rule.icon}</Text>
               <Text style={[styles.ruleLabel, { color: colors.textSecondary, flex: 1, marginLeft: 10 }]}>{rule.label}</Text>
-              <Text style={[styles.ruleXp, { color: colors.primary }]}>{rule.xp}</Text>
+              <Text style={[styles.ruleXp, { color: ringColor }]}>{rule.xp}</Text>
             </View>
           ))}
         </View>
@@ -203,7 +232,7 @@ export default function XpDetailScreen({ navigation, route }) {
         {/* ── All Levels ── */}
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>🏆 All Levels</Text>
-          {LEVELS.map((lvl, i) => (
+          {LEVELS.map((lvl) => (
             <LevelRow key={lvl.level} lvl={lvl} current={current} colors={colors} />
           ))}
         </View>
@@ -236,7 +265,8 @@ const styles = StyleSheet.create({
   navTitle:    { fontSize: 17, fontWeight: '700' },
 
   hero:        { alignItems: 'center', paddingTop: 32, paddingBottom: 24, paddingHorizontal: 24 },
-  ringWrap:    { width: 180, height: 180, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+  // ringWrap must match SVG_SIZE exactly so ringCenter can overlay precisely
+  ringWrap:    { width: 200, height: 200, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
   ringCenter:  { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
   heroLevel:   { fontSize: 22, fontWeight: '800', marginTop: 4 },
   heroName:    { fontSize: 14, fontWeight: '600', marginTop: 2 },

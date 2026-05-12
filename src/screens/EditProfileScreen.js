@@ -6,6 +6,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
+import { useUserProfile } from '../context/UserProfileContext';
 import api from '../lib/axios';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -76,6 +77,7 @@ function Toast({ visible }) {
 // ── Main screen ───────────────────────────────────────────────────────────────
 export default function EditProfileScreen({ navigation }) {
   const { colors } = useTheme();
+  const { updateProfileCache } = useUserProfile();
   const s = makeStyles(colors);
 
   const [loading, setSaving] = useState(false);
@@ -124,15 +126,23 @@ export default function EditProfileScreen({ navigation }) {
         bannerColor: bannerColor,
         pinnedBadge: pinnedBadge || null,
       });
-      setShowToast(true);
-      setTimeout(() => setShowToast(false), 2200);
-      setTimeout(() => navigation.goBack(), 1800);
+      // ── Optimistic instant update ────────────────────────────────────────────
+      // Write the new values into the shared UserProfileContext cache so
+      // ProfileScreen re-renders immediately when we pop back — no re-fetch.
+      updateProfileCache({
+        name:        name.trim(),
+        bio:         bio.trim() || '',
+        bannerColor: bannerColor,
+        pinnedBadge: pinnedBadge || null,
+      });
+      // Navigate back right away — no setTimeout delay.
+      navigation.goBack();
     } catch (err) {
       Alert.alert('Error', err.response?.data?.message || 'Could not save profile.');
     } finally {
       setSaving(false);
     }
-  }, [name, bio, bannerColor, pinnedBadge, navigation]);
+  }, [name, bio, bannerColor, pinnedBadge, navigation, updateProfileCache]);
 
   if (fetching) {
     return (
