@@ -1,7 +1,10 @@
 import React, { useEffect, useState, Component } from 'react';
 import { View, Text, Platform, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
+
+/** Exported so App.js can navigate from notification tap handlers. */
+export const navigationRef = createNavigationContainerRef();
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import * as SecureStore from 'expo-secure-store';
@@ -192,7 +195,7 @@ export default function AppNavigator() {
   if (status === 'loading') return <LoadingScreen />;
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <RootStack
         initialRoute={
           status === 'main'        ? 'Main'       :

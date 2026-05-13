@@ -224,6 +224,13 @@ export default function PublicProfileScreen({ route, navigation }) {
     } finally { setFriendBusy(false); }
   }, [friendStatus.requestId]);
 
+  // ── p and displayName MUST be declared here, before handleUnfriend ──────────────────
+  // handleUnfriend's dependency array [displayName, userId] is evaluated at render
+  // time. Declaring displayName after this point caused a TDZ ReferenceError on
+  // every render → caught by ProfileErrorBoundary → "Something went wrong" crash.
+  const p           = profile || {};
+  const displayName = (p.name || userName || 'StreakBoard User').trim() || 'StreakBoard User';
+
   const handleUnfriend = useCallback(() => {
     Alert.alert('Unfriend', `Remove ${displayName} from your friends?`, [
       { text: 'Cancel', style: 'cancel' },
@@ -239,8 +246,7 @@ export default function PublicProfileScreen({ route, navigation }) {
     ]);
   }, [displayName, userId]);
 
-  // Derived stats — always use optional chaining, never direct access
-  const p  = profile || {};
+  // Derived stats — p and displayName already declared above to avoid TDZ crash
   const st = p.stats || {};
   const currentStreak  = paramStreak ?? p.currentStreak ?? st.currentStreak ?? 0;
   const bestStreak     = st.longestStreak ?? st.bestStreak ?? p.bestStreak ?? p.longestStreak ?? 0;
@@ -270,8 +276,7 @@ export default function PublicProfileScreen({ route, navigation }) {
   const memberSince = p.createdAt
     ? new Date(p.createdAt).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
     : null;
-  // Guard: ensure displayName is never an empty string so displayName[0] can't throw
-  const displayName = (p.name || userName || 'StreakBoard User').trim() || 'StreakBoard User';
+  // NOTE: displayName is declared above (before handleUnfriend) to avoid TDZ crash.
 
   const shareProfile = async () => {
     const link = shareCode
@@ -476,53 +481,21 @@ export default function PublicProfileScreen({ route, navigation }) {
           ))}
         </View>
 
-        {/* ── Active habits ── */}
+        {/* ── Aggregate habit stats (habit names are private) ── */}
         <View style={{ marginHorizontal: 16, marginTop: 10 }}>
-          {habits.length > 0 ? (
-            <View style={{ backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 16 }}>
-              <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '700', marginBottom: 14 }}>
-                Active Habits ({habits.length})
-              </Text>
-              {habits.map((habit, i) => {
-                const rate = Math.min(Math.max(habit?.completionRate ?? habit?.weekRate ?? 0, 0), 100);
-                const habitName = habit?.name ?? 'Unnamed Habit';
-                return (
-                  <View key={habit?._id || i} style={{ marginBottom: i < habits.length - 1 ? 16 : 0 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 7 }}>
-                      <View style={{ width: 38, height: 38, borderRadius: 10, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
-                        <Text style={{ fontSize: 20 }}>{habit?.icon || '🎯'}</Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: colors.textPrimary, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>
-                          {habitName}
-                        </Text>
-                        <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 1 }}>
-                          {habit?.currentStreak != null ? `🔥 ${habit.currentStreak} day streak` : `${habit?.trackingPeriod ?? 30}-day goal`}
-                        </Text>
-                      </View>
-                      {habit?.todayStatus === 'done' && (
-                        <View style={{ backgroundColor: '#22C55E22', borderRadius: 10, paddingHorizontal: 9, paddingVertical: 4 }}>
-                          <Text style={{ color: '#22C55E', fontSize: 13, fontWeight: '700' }}>✓</Text>
-                        </View>
-                      )}
-                    </View>
-                    {/* 7-day progress bar */}
-                    <View style={{ height: 5, backgroundColor: colors.border, borderRadius: 3, overflow: 'hidden' }}>
-                      <View style={{ height: 5, width: `${rate}%`, backgroundColor: colors.primary, borderRadius: 3 }} />
-                    </View>
-                    <Text style={{ color: colors.textMuted, fontSize: 10, marginTop: 3 }}>{rate}% completion rate</Text>
-                  </View>
-                );
-              })}
+          <View style={{ backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 16 }}>
+            <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '700', marginBottom: 10 }}>Habit Stats</Text>
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <View style={{ flex: 1, backgroundColor: colors.bg, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 12, alignItems: 'center' }}>
+                <Text style={{ color: colors.primary, fontSize: 22, fontWeight: '800' }}>{st.totalHabits ?? habits.length ?? 0}</Text>
+                <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 4, textAlign: 'center' }}>Habits{`\n`}Tracked</Text>
+              </View>
+              <View style={{ flex: 1, backgroundColor: colors.bg, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 12, alignItems: 'center' }}>
+                <Text style={{ color: colors.primary, fontSize: 22, fontWeight: '800' }}>{st.activeDays ?? 0}</Text>
+                <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 4, textAlign: 'center' }}>Active{`\n`}Days</Text>
+              </View>
             </View>
-          ) : (
-            <View style={{ backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 16 }}>
-              <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '700', marginBottom: 6 }}>Habit Stats</Text>
-              <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: 'center', paddingVertical: 10 }}>
-                {`${st.totalHabits ?? 0} habit${(st.totalHabits ?? 0) !== 1 ? 's' : ''} tracked  ·  ${st.activeDays ?? 0} active day${(st.activeDays ?? 0) !== 1 ? 's' : ''}`}
-              </Text>
-            </View>
-          )}
+          </View>
         </View>
 
         {/* ── Share button ── */}

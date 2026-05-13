@@ -4,7 +4,7 @@ import {
   StyleSheet, ActivityIndicator, StatusBar, Image,
   RefreshControl, Switch, Alert, Share, Linking, FlatList, Modal,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Clipboard from 'expo-clipboard';
 import api from '../lib/axios';
@@ -47,6 +47,7 @@ export default function FriendsScreen({ navigation }) {
   const { colors } = useTheme();
   const s = makeStyles(colors);
   const { isOnline } = useOffline();
+  const insets = useSafeAreaInsets();
   // isOnline guard moved AFTER all hooks below (Rules of Hooks — no early return before hooks)
 
   const [shareData,    setShareData]    = useState({ shareCode: '', shareUrl: '', isProfilePublic: false });
@@ -129,7 +130,7 @@ export default function FriendsScreen({ navigation }) {
       navigation.navigate('PublicProfile', {
         shareCode: code,
         userName: userData?.name || 'User',
-        userId: userData?._id,
+        userId: userData?.userId || userData?._id,  // public profile returns userId field
       });
     } catch (e) {
       Alert.alert('Not Found', 'No public profile found with that share code. Check and try again.');
@@ -144,9 +145,9 @@ export default function FriendsScreen({ navigation }) {
     if (!code) { Alert.alert('', 'Please enter a share code first.'); return; }
     setAddingFriend(true);
     try {
-      // Resolve shareCode → userId, then POST the request
+      // Resolve shareCode → userId via public profile (returns userId field)
       const profileRes = await api.get(`/api/social/u/${code}`);
-      const targetId = profileRes.data?._id;
+      const targetId = profileRes.data?.userId || profileRes.data?._id;
       if (!targetId) throw new Error('Could not find that user.');
       await api.post('/api/social/friend-requests', { targetUserId: targetId });
       setFriendCode('');
@@ -163,7 +164,8 @@ export default function FriendsScreen({ navigation }) {
       await api.patch(`/api/social/friend-requests/${req._id}/accept`);
       setFriendRequests(prev => prev.filter(r => r._id !== req._id));
       await fetchFriends();
-      Alert.alert('🎉 Now Friends!', `You and ${req.senderName || 'them'} are now friends.`);
+      // req.from is populated: { _id, name, avatar, shareCode }
+      Alert.alert('🎉 Now Friends!', `You and ${req.from?.name || 'them'} are now friends.`);
     } catch (e) {
       Alert.alert('Error', e?.response?.data?.message || 'Could not accept.');
     }
@@ -446,9 +448,9 @@ export default function FriendsScreen({ navigation }) {
             </View>
             {friendRequests.map((req, idx) => (
               <View key={req._id} style={[s.requestRow, idx < friendRequests.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.border }]}>
-                <AvatarCircle user={{ name: req.senderName, avatar: req.senderAvatar }} size={44} />
+                <AvatarCircle user={{ name: req.from?.name, avatar: req.from?.avatar }} size={44} />
                 <View style={s.requestInfo}>
-                  <Text style={s.friendName} numberOfLines={1}>{req.senderName || 'Someone'}</Text>
+                  <Text style={s.friendName} numberOfLines={1}>{req.from?.name || 'Someone'}</Text>
                   <Text style={s.friendSub}>wants to be friends</Text>
                 </View>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -523,23 +525,26 @@ export default function FriendsScreen({ navigation }) {
       {/* ── Challenges Tab ── */}
       {activeTab === 'challenges' && (
         <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.bg }}>
-          {/* Back header */}
+          {/* Back header — padded below status bar using safe area inset */}
           <View style={{
             flexDirection: 'row', alignItems: 'center',
-            paddingHorizontal: 16, paddingTop: 14, paddingBottom: 12,
+            paddingHorizontal: 16,
+            paddingTop: insets.top + 14,
+            paddingBottom: 14,
             borderBottomWidth: 1, borderBottomColor: colors.border,
             backgroundColor: colors.bg,
           }}>
             <TouchableOpacity
               onPress={() => setActiveTab('friends')}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               style={{
-                width: 36, height: 36, borderRadius: 18,
-                backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
-                alignItems: 'center', justifyContent: 'center', marginRight: 12,
+                padding: 12,
+                marginLeft: -8, marginRight: 6,
+                borderRadius: 12,
+                backgroundColor: colors.card,
+                borderWidth: 1, borderColor: colors.border,
               }}
             >
-              <Text style={{ color: colors.primary, fontSize: 18, fontWeight: '700' }}>←</Text>
+              <Text style={{ color: colors.primary, fontSize: 20, fontWeight: '800', lineHeight: 22 }}>←</Text>
             </TouchableOpacity>
             <Text style={{ color: colors.textPrimary, fontSize: 17, fontWeight: '800', flex: 1 }}>
               ⚔️ Challenges
@@ -549,40 +554,56 @@ export default function FriendsScreen({ navigation }) {
           contentContainerStyle={[s.content, { paddingTop: 16 }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary}/>}>
           {challenges.length === 0 ? (
-            <View style={s.emptyFriends}>
-              <Text style={s.emptyEmoji}>⚔️</Text>
+            <View style={[s.emptyFriends, { marginTop: 48 }]}>
+              <Text style={{ fontSize: 64, textAlign: 'center', marginBottom: 16 }}>⚔️</Text>
               <Text style={s.emptyTitle}>No challenges yet</Text>
-              <Text style={s.emptySub}>Tap the ⚔️ button next to a friend to challenge them.</Text>
+              <Text style={[s.emptySub, { paddingHorizontal: 32 }]}>
+                Go to your Friends list and tap the ⚔️ button next to a friend to start a 7-day challenge!
+              </Text>
             </View>
           ) : challenges.map(c => {
-            const isChallenger = c.challengerId?._id === undefined
-              ? String(c.challengerId) !== undefined : true;
-            const me = c.challengerId;
-            const them = c.challengedId;
-            const myDays = c.challengerDaysLogged?.length ?? 0;
+            const me    = c.challengerId;
+            const them  = c.challengedId;
+            const myDays    = c.challengerDaysLogged?.length ?? 0;
             const theirDays = c.challengedDaysLogged?.length ?? 0;
             const days = c.startDate
               ? Array.from({length:7},(_,i)=>{ const d=new Date(c.startDate+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()+i); return d.toISOString().split('T')[0]; })
               : [];
+            const daysLeft = c.endDate ? Math.max(0, Math.ceil((new Date(c.endDate)-new Date())/86400000)) : null;
             const statusColor = c.status==='active' ? colors.primary : c.status==='complete' ? '#16a34a' : c.status==='pending' ? '#f59e0b' : '#ef4444';
             return (
               <View key={c._id} style={s.challengeCard}>
+                {/* Status row */}
                 <View style={s.challengeCardTop}>
                   <View style={[s.statusPill,{backgroundColor:statusColor+'22',borderColor:statusColor+'55'}]}>
                     <Text style={[s.statusPillTxt,{color:statusColor}]}>{c.status.toUpperCase()}</Text>
                   </View>
-                  {c.status==='active' && c.endDate && (
-                    <Text style={s.challengeDays}>{Math.max(0,Math.ceil((new Date(c.endDate)-new Date())/86400000))}d left</Text>
+                  {c.status==='active' && daysLeft !== null && (
+                    <Text style={s.challengeDays}>🗓 {daysLeft}d left</Text>
                   )}
                 </View>
+
+                {/* Habit name */}
                 <Text style={s.challengeHabit}>{c.habitName}</Text>
-                <View style={s.challengePlayers}>
-                  <Text style={s.challengePlayer} numberOfLines={1}>{me?.name ?? 'You'}</Text>
+
+                {/* Participants with avatars */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                  <AvatarCircle user={{ name: me?.name, avatar: me?.avatar }} size={32} />
+                  <View style={{ flex: 1, marginLeft: 8 }}>
+                    <Text style={[s.challengePlayer, { fontSize: 13 }]} numberOfLines={1}>{me?.name ?? 'You'}</Text>
+                    <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '700' }}>{myDays}/7 days</Text>
+                  </View>
                   <Text style={s.challengeVs}>vs</Text>
-                  <Text style={s.challengePlayer} numberOfLines={1}>{them?.name ?? '...'}</Text>
+                  <View style={{ flex: 1, marginRight: 8, alignItems: 'flex-end' }}>
+                    <Text style={[s.challengePlayer, { fontSize: 13 }]} numberOfLines={1}>{them?.name ?? '...'}</Text>
+                    <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '700' }}>{theirDays}/7 days</Text>
+                  </View>
+                  <AvatarCircle user={{ name: them?.name, avatar: them?.avatar }} size={32} />
                 </View>
+
+                {/* Progress grid */}
                 {c.status !== 'pending' && days.length > 0 && (
-                  <View style={s.gridRow}>
+                  <View style={{ gap: 6 }}>
                     <View style={s.dayGrid}>
                       {days.map(d => (
                         <View key={d+'c'} style={[s.dayDot, c.challengerDaysLogged?.includes(d) && s.dayDotDone]}>
@@ -599,11 +620,15 @@ export default function FriendsScreen({ navigation }) {
                     </View>
                   </View>
                 )}
+
+                {/* Result */}
                 {c.status==='complete' && (
                   <Text style={s.resultTxt}>
                     {myDays === theirDays ? '🤝 Tied!' : myDays > theirDays ? '🏆 You won! +50 XP' : `🥈 ${them?.name} won`}
                   </Text>
                 )}
+
+                {/* Accept/decline for pending challenges */}
                 {c.status==='pending' && (
                   <View style={s.pendingActions}>
                     <TouchableOpacity style={s.acceptBtn} onPress={() => handleAccept(c._id)}>
