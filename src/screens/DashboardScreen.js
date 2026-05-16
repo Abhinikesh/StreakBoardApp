@@ -196,6 +196,11 @@ export default function DashboardScreen({ navigation }) {
   const [savingReminder, setSavingReminder] = useState(false);
   // ── Overflow ("...") menu state — shows ⏰/📅 so main card stays clean ───────
   const [overflowHabit, setOverflowHabit] = useState(null);
+  const [noteModalHabit, setNoteModalHabit] = useState(null);
+  const [noteText, setNoteText] = useState("");
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [showNoteModal, setShowNoteModal] = useState(false);
+  const [showNoteSuccess, setShowNoteSuccess] = useState(false);
 
   // ── Fetch all data (cache-first / stale-while-revalidate) ───────────────────
   const fetchAll = useCallback(async () => {
