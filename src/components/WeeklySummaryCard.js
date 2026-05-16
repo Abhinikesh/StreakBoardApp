@@ -1,16 +1,3 @@
-/**
- * components/WeeklySummaryCard.js
- *
- * Dismissable "week in review" card shown on the Dashboard on Sunday and Monday.
- * Fetches stats from GET /api/weekly-summary and persists the dismissal key
- * in AsyncStorage so it only reappears next week.
- *
- * Usage:
- *   <WeeklySummaryCard colors={colors} />
- *
- * It is self-contained: manages its own fetch, loading, and dismiss state.
- */
-
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -23,9 +10,6 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../lib/axios';
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/** Returns true only on Sunday (0) and Monday (1) local time. */
 function isSundayOrMonday() {
   const day = new Date().getDay(); // 0=Sun, 1=Mon
   return day === 0 || day === 1;
