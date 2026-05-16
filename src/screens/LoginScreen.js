@@ -212,7 +212,7 @@ export default function LoginScreen({ navigation }) {
       setLoading(true);
       setError(null);
 
-      const redirectUrl = 'streakboard://auth/callback';
+      const redirectUrl = 'habitboard://auth/callback';
       const authUrl =
         'https://streakboard.onrender.com/api/auth/google' +
         '?redirectUrl=' + encodeURIComponent(redirectUrl);

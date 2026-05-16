@@ -75,7 +75,9 @@
               "targetCellWidth": 2,
               "targetCellHeight": 2,
               "updatePeriodMillis": 1800000,
-              "widgetFeatures": ["reconfigurable"]
+              "widgetFeatures": [
+                "reconfigurable"
+              ]
             },
             {
               "name": "StreakMedium",
@@ -86,7 +88,9 @@
               "targetCellWidth": 4,
               "targetCellHeight": 2,
               "updatePeriodMillis": 1800000,
-              "widgetFeatures": ["reconfigurable"]
+              "widgetFeatures": [
+                "reconfigurable"
+              ]
             }
           ]
         }
@@ -94,12 +98,12 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "38630291-cf31-48aa-9431-1ad2adfe778e"
+        "projectId": "083160d2-5489-4492-9442-5bf4f71f3c9d"
       }
     },
     "updates": {
       "fallbackToCacheTimeout": 0
     },
-    "owner": "abhinikeshkumar"
+    "owner": "abhinikesh22"
   }
 }
