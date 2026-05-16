@@ -1,7 +1,7 @@
 /**
  * src/constants/design.js
  *
- * Single source of truth for the StreakBoard design system.
+ * Single source of truth for the HabitBoard design system.
  * Every screen should import from here instead of defining ad-hoc values.
  *
  * Rules enforced:

@@ -278,7 +278,6 @@ export default function StatsScreen() {
   const [logsMap,    setLogsMap]    = useState({});
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [tab,        setTab]        = useState('overview');
 
   const fetchAll = useCallback(async () => {
     try {
@@ -349,24 +348,13 @@ export default function StatsScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} />}
       >
-        <View style={s.tabRow}>
-          {['overview', 'habits'].map((t) => (
-            <TouchableOpacity key={t} style={[s.tab, tab === t && s.tabActive]}
-              onPress={() => setTab(t)} activeOpacity={0.75}>
-              <Text style={[s.tabTxt, tab === t && s.tabTxtActive]}>
-                {t === 'overview' ? 'Overview' : 'Per Habit'}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
         {habits.length === 0 ? (
           <View style={s.empty}>
             <Text style={s.emptyEmoji}>📋</Text>
             <Text style={s.emptyTitle}>No data yet</Text>
             <Text style={s.emptySub}>Add habits from the Dashboard to see stats.</Text>
           </View>
-        ) : tab === 'overview' ? (
+        ) : (
           <>
             <View style={s.grid}>
               <View style={[s.cell, s.bRight, s.bBottom]}>
@@ -492,54 +480,6 @@ export default function StatsScreen() {
             {/* ── Streak History ── */}
             <StreakHistorySection allLogs={allLogs} colors={colors} />
           </>
-        ) : (
-          habits.map((h) => {
-            const logs       = logsMap[h._id] || [];
-            const streak     = computeStreak(logs);
-            const best       = computeBestStreak(logs);
-            const col        = h.colorHex || colors.primary;
-            const thisMonth  = logs.filter((l) => l.date.startsWith(currentMonth));
-            const monthDone  = thisMonth.filter((l) => l.status === 'done').length;
-            const monthTotal = thisMonth.length;
-            const rate       = monthTotal > 0 ? Math.round((monthDone / monthTotal) * 100) : 0;
-            const totalHDone = logs.filter((l) => l.status === 'done').length;
-            return (
-              <View key={h._id} style={s.hCard}>
-                <View style={[s.hAccentBar, { backgroundColor: col }]} />
-                <View style={s.hBody}>
-                  <View style={s.hHeader}>
-                    <Text style={s.hIcon}>{h.icon}</Text>
-                    <Text style={s.hName} numberOfLines={1}>{h.name}</Text>
-                    <View style={[s.rateBadge, { backgroundColor: rateBadgeBg(rate) }]}>
-                      <Text style={[s.rateBadgeTxt, { color: rateColor(rate) }]}>{rate}%</Text>
-                    </View>
-                  </View>
-                  <View style={s.hProgressSection}>
-                    <Text style={s.hProgressLabel}>This month completion</Text>
-                    <View style={s.hProgressTrack}>
-                      <View style={[s.hProgressFill, { width: `${rate}%`, backgroundColor: col }]} />
-                    </View>
-                  </View>
-                  <View style={s.miniRow}>
-                    {[
-                      ['🔥', streak, 'Current'],
-                      ['⭐', best, 'Best'],
-                      ['📅', monthDone, 'This Month'],
-                      ['✅', totalHDone, 'Total Done'],
-                    ].map(([icon, val, lbl], i, arr) => (
-                      <React.Fragment key={lbl}>
-                        <View style={s.mini}>
-                          <Text style={s.miniNum}>{val}</Text>
-                          <Text style={s.miniLbl}>{icon} {lbl}</Text>
-                        </View>
-                        {i < arr.length - 1 && <View style={s.miniDiv} />}
-                      </React.Fragment>
-                    ))}
-                  </View>
-                </View>
-              </View>
-            );
-          })
         )}
       </ScrollView>
     </SafeAreaView>

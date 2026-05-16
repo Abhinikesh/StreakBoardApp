@@ -39,7 +39,7 @@ export function StreakMediumWidget({
         }}
       >
         <TextWidget
-          text="🔥 StreakBoard"
+          text="🔥 HabitBoard"
           style={{ color: '#a78bfa', fontSize: 9, fontWeight: 'bold' }}
         />
         <TextWidget

@@ -1,9 +1,9 @@
 {
   "expo": {
-    "name": "StreakBoard",
+    "name": "HabitBoard",
     "slug": "streako",
     "version": "1.1.2",
-    "scheme": "streakboard",
+    "scheme": "habitboard",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -32,7 +32,7 @@
           "autoVerify": true,
           "data": [
             {
-              "scheme": "streakboard"
+              "scheme": "habitboard"
             }
           ],
           "category": [
@@ -68,7 +68,7 @@
           "widgets": [
             {
               "name": "StreakSmall",
-              "label": "StreakBoard – Small",
+              "label": "HabitBoard – Small",
               "description": "Current streak and today's habit progress",
               "minWidth": "110dp",
               "minHeight": "110dp",
@@ -79,7 +79,7 @@
             },
             {
               "name": "StreakMedium",
-              "label": "StreakBoard",
+              "label": "HabitBoard",
               "description": "Streak, progress, and today's habit list",
               "minWidth": "250dp",
               "minHeight": "110dp",

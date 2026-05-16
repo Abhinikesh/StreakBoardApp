@@ -107,7 +107,7 @@ export async function scheduleHabitReminder(timeStr, userId) {
     await Notifications.scheduleNotificationAsync({
       identifier: GLOBAL_NOTIF_ID,
       content: {
-        title: '🔥 StreakBoard',
+        title: '🔥 HabitBoard',
         body:  "Don't forget to log your habits today!",
         sound: true,
         ...(Platform.OS === 'android' && { channelId: CHANNEL_ID }),

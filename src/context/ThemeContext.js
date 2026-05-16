@@ -1,9 +1,7 @@
 /**
  * src/context/ThemeContext.js
  *
- * Extends the existing light/dark/system toggle with 6 selectable accent palettes.
- * All screens already consume `colors.primary` from this context — so changing the
- * accent automatically propagates to every screen with zero per-screen changes.
+ * Light/dark/system toggle with 8 selectable accent palettes.
  */
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useColorScheme } from 'react-native';
@@ -11,14 +9,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const ThemeContext = createContext();
 
-const THEME_KEY  = 'themeMode';   // 'light' | 'dark' | 'system'
-const ACCENT_KEY = 'accentKey';   // see ACCENTS below
+const THEME_KEY  = 'themeMode';
+const ACCENT_KEY = 'accentKey';
 
-// ── 6 accent palettes ─────────────────────────────────────────────────────────
-// lightPrimary = shown on light bg   darkPrimary = shown on dark bg (lighter)
 export const ACCENTS = {
   purple: {
-    name:        'Default Purple',
+    name:        'Deep Purple',
     swatch:      '#7C3AED',
     lightPrimary:'#7C3AED', lightHover: '#6D28D9',
     darkPrimary: '#A78BFA', darkHover:  '#7C3AED',
@@ -36,35 +32,46 @@ export const ACCENTS = {
     darkPrimary: '#4ADE80', darkHover:  '#22C55E',
   },
   sunset: {
-    name:        'Sunset Red',
-    swatch:      '#B91C1C',
-    lightPrimary:'#B91C1C', lightHover: '#991B1B',
-    darkPrimary: '#F87171', darkHover:  '#EF4444',
+    name:        'Sunset Orange',
+    swatch:      '#EA580C',
+    lightPrimary:'#EA580C', lightHover: '#C2410C',
+    darkPrimary: '#FB923C', darkHover:  '#F97316',
   },
-  midnight: {
-    name:        'Midnight',
-    swatch:      '#1E1B4B',
-    lightPrimary:'#4338CA', lightHover: '#3730A3',
-    darkPrimary: '#818CF8', darkHover:  '#6366F1',
+  rose: {
+    name:        'Rose Pink',
+    swatch:      '#E11D48',
+    lightPrimary:'#E11D48', lightHover: '#BE123C',
+    darkPrimary: '#FB7185', darkHover:  '#F43F5E',
   },
   slate: {
-    name:        'Slate Grey',
+    name:        'Slate Dark',
     swatch:      '#334155',
     lightPrimary:'#334155', lightHover: '#1E293B',
     darkPrimary: '#94A3B8', darkHover:  '#64748B',
   },
+  amber: {
+    name:        'Amber Gold',
+    swatch:      '#D97706',
+    lightPrimary:'#D97706', lightHover: '#B45309',
+    darkPrimary: '#FCD34D', darkHover:  '#F59E0B',
+  },
+  teal: {
+    name:        'Cool Teal',
+    swatch:      '#0F766E',
+    lightPrimary:'#0F766E', lightHover: '#115E59',
+    darkPrimary: '#2DD4BF', darkHover:  '#14B8A6',
+  },
 };
 
-// ── Base palettes (structural — primary is overridden per accent) ──────────────
 const BASE_DARK = {
-  bg:           '#0d0d1a',
-  card:         '#111120',
-  border:       '#1e1e2e',
-  borderHover:  '#2a2a3a',
-  textPrimary:  '#ffffff',    // contrast ~19:1 on bg ✅
-  textSecondary:'#D1D5DB',    // was #888888 (~4.2:1) → now ~12:1 ✅
-  textMuted:    '#9CA3AF',    // was #555555 (~2.4:1, invisible) → now ~7:1 ✅
-  textDisabled: '#4B5563',    // intentionally low — truly disabled state
+  bg:           '#000000',
+  card:         '#0a0a0a',
+  border:       '#1a1a1a',
+  borderHover:  '#2a2a2a',
+  textPrimary:  '#ffffff',
+  textSecondary:'#D1D5DB',
+  textMuted:    '#9CA3AF',
+  textDisabled: '#4B5563',
   success:      '#10b981',
   danger:       '#ef4444',
 };
@@ -81,7 +88,6 @@ const BASE_LIGHT = {
   danger:       '#ef4444',
 };
 
-// Keep DARK/LIGHT exports for any code that imports them directly
 export const DARK  = { ...BASE_DARK,  primary: '#7c3aed', primaryHover: '#6d28d9' };
 export const LIGHT = { ...BASE_LIGHT, primary: '#7c3aed', primaryHover: '#6d28d9' };
 
@@ -95,7 +101,6 @@ function buildColors(isDark, accent) {
   };
 }
 
-// ── Provider ──────────────────────────────────────────────────────────────────
 export function ThemeProvider({ children }) {
   const systemScheme = useColorScheme();
   const [themeMode,  setThemeModeState] = useState('system');
@@ -130,7 +135,6 @@ export function ThemeProvider({ children }) {
     try { await AsyncStorage.setItem(ACCENT_KEY, key); } catch (_) {}
   }, []);
 
-  // Backward-compat
   const toggleTheme = useCallback(async (value) => {
     const next = typeof value === 'boolean' ? value : !isDark;
     await setThemeMode(next ? 'dark' : 'light');

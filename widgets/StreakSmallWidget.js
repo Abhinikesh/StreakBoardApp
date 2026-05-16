@@ -32,7 +32,7 @@ export function StreakSmallWidget({
     >
       {/* App label */}
       <TextWidget
-        text="🔥 StreakBoard"
+        text="🔥 HabitBoard"
         style={{ color: '#a78bfa', fontSize: 10, fontWeight: 'bold' }}
       />
 

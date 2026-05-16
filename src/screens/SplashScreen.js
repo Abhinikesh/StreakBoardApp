@@ -6,14 +6,12 @@ export default function SplashScreen() {
   const fadeAnim  = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Fade in content
     Animated.timing(fadeAnim, {
       toValue: 1,
       duration: 600,
       useNativeDriver: true,
     }).start();
 
-    // Pulse the flame forever
     Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, {
@@ -36,7 +34,7 @@ export default function SplashScreen() {
         <Animated.Text style={[styles.flame, { transform: [{ scale: pulseAnim }] }]}>
           🔥
         </Animated.Text>
-        <Text style={styles.brand}>StreakBoard</Text>
+        <Text style={styles.brand}>HabitBoard</Text>
         <Text style={styles.tagline}>Track what you do.</Text>
         <Text style={styles.tagline2}>Not what you plan.</Text>
       </Animated.View>

@@ -193,7 +193,7 @@ export default function CalendarScreen({ navigation, route }) {
             onPress: async () => {
               await Share.share({
                 url: uri,
-                message: `My ${selectedHabit?.name} streak on StreakBoard! 🔥 Track yours at streak-o.vercel.app`,
+                message: `My ${selectedHabit?.name} streak on HabitBoard! 🔥`,
               });
             },
           },
@@ -223,14 +223,10 @@ export default function CalendarScreen({ navigation, route }) {
   const rows       = chunkArray(cells, 7);
 
   // ── Stats calculations ───────────────────────────────────────────────────
-  const habitDuration  = selectedHabit?.trackingPeriod || 30;
   const startDate      = selectedHabit?.createdAt ? new Date(selectedHabit.createdAt) : new Date();
-  const todayDate      = new Date();
-  const daysPassed     = Math.max(1, Math.floor((todayDate - startDate) / (1000 * 60 * 60 * 24)) + 1);
-  const daysRemaining  = Math.max(0, habitDuration - daysPassed);
+  const daysPassed     = Math.max(1, Math.floor((new Date() - startDate) / (1000 * 60 * 60 * 24)) + 1);
   const doneDays       = logs.filter((l) => l.status === 'done').length;
   const missedDays     = logs.filter((l) => l.status === 'missed').length;
-  const doneLogs       = logs.filter((l) => l.status === 'done');
   const completionRate = daysPassed > 0 ? Math.round((doneDays / daysPassed) * 100) : 0;
   const curStreak      = computeStreak(logs);
   const bestStreak     = computeBestStreak(logs);
@@ -321,21 +317,11 @@ export default function CalendarScreen({ navigation, route }) {
                 <Text style={s.shareHabitIcon}>{selectedHabit?.icon}</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={s.shareHabitName}>{selectedHabit?.name}</Text>
-                  <Text style={s.shareHabitSub}>{`${selectedHabit?.trackingPeriod || 30}-day streak tracker`}</Text>
+                  <Text style={s.shareHabitSub}>Streak tracker</Text>
                 </View>
                 <View style={s.streakBadge}>
                   <Text style={s.streakBadgeText}>🔥 {curStreak} day streak</Text>
                 </View>
-                {daysRemaining > 0 && (
-                  <View style={{
-                    backgroundColor: '#EFF6FF', borderRadius: 12,
-                    paddingHorizontal: 10, paddingVertical: 4, marginLeft: 6,
-                  }}>
-                    <Text style={{ color: '#3B82F6', fontSize: 12, fontWeight: '600' }}>
-                      {daysRemaining}d left
-                    </Text>
-                  </View>
-                )}
               </View>
 
               {/* Month navigator row with Share button */}
@@ -382,9 +368,9 @@ export default function CalendarScreen({ navigation, route }) {
                 borderWidth: 1, borderColor: colors.border, overflow: 'hidden',
               }}>
                 {[
-                  { value: doneDays,           label: 'DONE',   color: '#22C55E' },
-                  { value: missedDays,          label: 'MISSED', color: '#EF4444' },
-                  { value: daysRemaining,       label: 'REMAIN', color: colors.textPrimary },
+                  { value: doneDays,            label: 'DONE',   color: '#22C55E' },
+                  { value: missedDays,           label: 'MISSED', color: '#EF4444' },
+                  { value: curStreak,            label: 'STREAK', color: colors.primary },
                   { value: `${completionRate}%`, label: 'RATE',   color: '#7C3AED' },
                 ].map((item, index) => (
                   <View
@@ -408,9 +394,8 @@ export default function CalendarScreen({ navigation, route }) {
                 ))}
               </View>
 
-              {/* StreakBoard watermark */}
               <View style={s.watermark}>
-                <Text style={s.watermarkText}>🔥 StreakBoard • streak-o.vercel.app</Text>
+                <Text style={s.watermarkText}>🔥 HabitBoard</Text>
               </View>
 
             </View>

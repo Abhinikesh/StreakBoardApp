@@ -302,7 +302,7 @@ export default function LoginScreen({ navigation }) {
         >
           {/* 1. Brand header */}
           <Text style={styles.brandEmoji}>🔥</Text>
-          <Text style={styles.brandName}>StreakBoard</Text>
+          <Text style={styles.brandName}>HabitBoard</Text>
           <Text style={styles.brandTagline}>
             Track what you do. Not what you plan.
           </Text>

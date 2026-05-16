@@ -2,12 +2,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, Image, ScrollView, TouchableOpacity, TextInput,
   StyleSheet, ActivityIndicator, StatusBar,
-  Alert, Switch, Share, Modal,
+  Alert, Switch, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as SecureStore from 'expo-secure-store';
-import * as Clipboard from 'expo-clipboard';
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api, { setAuthToken } from '../lib/axios';
 import { useTheme, ACCENTS } from '../context/ThemeContext';
@@ -21,9 +21,7 @@ import {
 import { getComebackStatus, updateBestStreak } from '../lib/comeback';
 import { useUserProfile } from '../context/UserProfileContext';
 
-import { WEB_BASE } from '../config/api';
 
-const BASE_URL = WEB_BASE;
 
 function getAvatarColor(name) {
   const palette = ['#7c3aed', '#10b981', '#ef4444', '#f59e0b', '#3b82f6', '#ec4899', '#14b8a6', '#f97316'];
@@ -47,7 +45,7 @@ export default function ProfileScreen({ navigation }) {
   const s = makeStyles(colors);
 
   const [profile, setProfile] = useState({ name: '', email: '', createdAt: '', avatar: '' });
-  const [shareData, setShareData] = useState({ shareCode: '', shareUrl: '' });
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
@@ -60,7 +58,7 @@ export default function ProfileScreen({ navigation }) {
   const [showThemePicker, setShowThemePicker] = useState(false);
   const [emailNotifsEnabled, setEmailNotifsEnabled] = useState(true);
   const [pushNotifsEnabled,  setPushNotifsEnabled]  = useState(true);
-  const [copyText, setCopyText] = useState('Copy');
+
   const [savingReminder, setSavingReminder] = useState(false);
   const [avatarUri, setAvatarUri] = useState(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -71,10 +69,9 @@ export default function ProfileScreen({ navigation }) {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [profileRes, habitsRes, shareRes, xpRes, shieldRes] = await Promise.all([
+      const [profileRes, habitsRes, xpRes, shieldRes] = await Promise.all([
         api.get('/api/user/profile'),
         api.get('/api/habits'),
-        api.get('/api/social/my-share').catch(() => ({ data: {} })),
         api.get('/api/xp/profile').catch(() => ({ data: null })),
         api.get('/api/shields/status').catch(() => ({ data: { shieldCount: 0, shieldsUsedTotal: 0 } })),
       ]);
@@ -83,17 +80,13 @@ export default function ProfileScreen({ navigation }) {
       setProfile(p);
       setEditName(p.name || '');
       if (p.avatar) setAvatarUri(p.avatar);
-      setShareData(shareRes.data || {});
-      // Seed the shared profile cache so EditProfileScreen can write back instantly
-      updateProfileCache({
-        name:        p.name        || '',
-        bio:         p.bio         || '',
-        bannerColor: p.bannerColor || '#7C3AED',
-        pinnedBadge: p.pinnedBadge?.icon ? p.pinnedBadge : null,
-        avatar:      p.avatar      || null,
-      });
       if (xpRes.data) setXpData(xpRes.data);
       if (shieldRes.data) setShieldData(shieldRes.data);
+      updateProfileCache({
+        name:        p.name   || '',
+        pinnedBadge: p.pinnedBadge?.icon ? p.pinnedBadge : null,
+        avatar:      p.avatar || null,
+      });
       // seasonBadges live on the User doc, already fetched via /api/user/profile
       // We read them directly from profile.seasonBadges in the render.
 
@@ -220,19 +213,6 @@ export default function ProfileScreen({ navigation }) {
       setPushNotifsEnabled(!val);
     }
   }, []);
-
-  const handleCopy = useCallback(async () => {
-    const url = shareData.shareUrl || `${BASE_URL}/u/${shareData.shareCode}`;
-    await Clipboard.setStringAsync(url);
-    setCopyText('Copied!');
-    setTimeout(() => setCopyText('Copy'), 2000);
-  }, [shareData]);
-
-  const handleShare = useCallback(async () => {
-    const url = `${BASE_URL}/u/${shareData.shareCode}`;
-    try { await Share.share({ message: `Track my habits on StreakBoard! ${url}`, url }); }
-    catch (_) { }
-  }, [shareData.shareCode]);
 
   const handleLogout = useCallback(() => {
     Alert.alert('Log out', 'Are you sure you want to log out?', [
@@ -376,7 +356,7 @@ export default function ProfileScreen({ navigation }) {
   const memberSince = profile.createdAt
     ? new Date(profile.createdAt).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
     : 'April 2026';
-  const profileUrl = shareData.shareUrl || `${BASE_URL}/u/${shareData.shareCode}`;
+
 
   if (loading) {
     return <View style={s.center}><ActivityIndicator size="large" color={colors.primary} /></View>;
@@ -389,7 +369,6 @@ export default function ProfileScreen({ navigation }) {
         keyboardShouldPersistTaps="handled">
 
         {/* ── Banner color strip ── */}
-        <View style={[s.profileBanner, { backgroundColor: eff.bannerColor || '#7C3AED' }]} />
 
         {/* Avatar + name */}
         <View style={s.avatarSection}>
@@ -452,10 +431,7 @@ export default function ProfileScreen({ navigation }) {
           )}
           <Text style={s.profileEmail}>{profile.email}</Text>
 
-          {/* Bio */}
-          {!!eff.bio && (
-            <Text style={s.profileBio}>{eff.bio}</Text>
-          )}
+
 
           {/* Pinned badge */}
           {eff.pinnedBadge?.icon ? (
@@ -571,75 +547,6 @@ export default function ProfileScreen({ navigation }) {
           </View>
         </View>
 
-        {/* MY HABITS */}
-        <View style={s.section}>
-          <Text style={s.sectionTitle}>MY HABITS</Text>
-          {habits.length === 0 && (
-            <Text style={[s.infoLabel, { paddingHorizontal: 16, paddingBottom: 12 }]}>
-              No active habits yet.
-            </Text>
-          )}
-          {habits.map((habit, i) => (
-            <View
-              key={habit._id}
-              style={{
-                flexDirection: 'row', alignItems: 'center',
-                paddingHorizontal: 16, paddingVertical: 12,
-                borderBottomWidth: i < habits.length - 1 ? 1 : 0,
-                borderBottomColor: colors.border,
-              }}
-            >
-              <Text style={{ fontSize: 20, marginRight: 10 }}>{habit.icon || '\ud83d\udccc'}</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: colors.textPrimary, fontSize: 14, fontWeight: '600' }}>
-                  {habit.name}
-                </Text>
-                <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>
-                  {habit.trackingPeriod || 30}-day goal
-                </Text>
-              </View>
-              {/* Reorder arrows */}
-              <TouchableOpacity
-                onPress={() => handleReorderHabit(i, -1)}
-                disabled={i === 0}
-                style={{ padding: 6, opacity: i === 0 ? 0.25 : 1 }}
-                hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
-                activeOpacity={0.65}
-              >
-                <Text style={{ color: colors.textMuted, fontSize: 16 }}>↑</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => handleReorderHabit(i, 1)}
-                disabled={i === habits.length - 1}
-                style={{ padding: 6, opacity: i === habits.length - 1 ? 0.25 : 1 }}
-                hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
-                activeOpacity={0.65}
-              >
-                <Text style={{ color: colors.textMuted, fontSize: 16 }}>↓</Text>
-              </TouchableOpacity>
-              {/* Delete */}
-              <TouchableOpacity
-                onPress={() => confirmDeleteHabit(habit._id, habit.name)}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                style={{ padding: 8 }}
-                activeOpacity={0.7}
-              >
-                <Text style={{ fontSize: 18 }}>🗑️</Text>
-              </TouchableOpacity>
-            </View>
-          ))}
-          <TouchableOpacity
-            onPress={() => navigation.navigate('Home')}
-            style={{
-              borderWidth: 1.5, borderColor: colors.border, borderStyle: 'dashed',
-              borderRadius: 10, padding: 14, alignItems: 'center',
-              margin: 16, marginTop: habits.length ? 8 : 4,
-            }}
-            activeOpacity={0.75}
-          >
-            <Text style={{ color: colors.textMuted, fontSize: 14 }}>+ Add New Habit</Text>
-          </TouchableOpacity>
-        </View>
 
         {/* Preferences */}
         <View style={s.section}>
@@ -790,35 +697,8 @@ export default function ProfileScreen({ navigation }) {
           </View>
         </View>
 
-        {/* Public profile */}
-        {shareData.shareCode ? (
-          <View style={s.section}>
-            <Text style={s.sectionTitle}>PUBLIC PROFILE</Text>
-            <View style={s.urlRow}>
-              <Text style={s.urlText} numberOfLines={1}>{profileUrl}</Text>
-              <TouchableOpacity style={s.copyBtn} onPress={handleCopy} activeOpacity={0.85}>
-                <Text style={s.copyBtnText}>{copyText}</Text>
-              </TouchableOpacity>
-            </View>
-            <TouchableOpacity style={s.shareLinkBtn} onPress={handleShare} activeOpacity={0.85}>
-              <Text style={s.shareLinkTxt}>🔗 Share Link</Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
 
-        {/* Social nav */}
-        <View style={s.section}>
-          <Text style={s.sectionTitle}>SOCIAL</Text>
-          <TouchableOpacity style={s.navRow} onPress={() => navigation.navigate('Friends')} activeOpacity={0.75}>
-            <Text style={s.navRowText}>👥 Friends & Share Code</Text>
-            <Text style={s.navRowArrow}>›</Text>
-          </TouchableOpacity>
-          <View style={s.divider} />
-          <TouchableOpacity style={s.navRow} onPress={() => navigation.navigate('Journal')} activeOpacity={0.75}>
-            <Text style={s.navRowText}>📓 My Journal</Text>
-            <Text style={s.navRowArrow}>›</Text>
-          </TouchableOpacity>
-        </View>
+
 
         {/* Logout */}
         <TouchableOpacity style={s.logoutBtn} onPress={handleLogout} activeOpacity={0.85}>
@@ -827,7 +707,7 @@ export default function ProfileScreen({ navigation }) {
 
         {/* Footer */}
         <View style={s.footer}>
-          <Text style={s.footerBrand}>🔥 StreakBoard</Text>
+          <Text style={s.footerBrand}>🔥 HabitBoard</Text>
           <Text style={s.footerTagline}>Track what you do. Not what you plan.</Text>
           <Text style={s.footerVersion}>Version 1.0.0</Text>
         </View>
@@ -974,12 +854,7 @@ const makeStyles = (colors) => StyleSheet.create({
   badge: { backgroundColor: 'rgba(124,58,237,0.12)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
   badgeTxt: { color: colors.primary, fontSize: 11, fontWeight: '600' },
 
-  urlRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.bg, borderRadius: 10, marginHorizontal: 16, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10 },
-  urlText: { flex: 1, color: colors.textSecondary, fontSize: 12 },
-  copyBtn: { backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, marginLeft: 8 },
-  copyBtnText: { color: colors.textPrimary, fontSize: 12, fontWeight: '600' },
-  shareLinkBtn: { borderWidth: 1, borderColor: colors.primary, borderRadius: 12, marginHorizontal: 16, marginBottom: 14, paddingVertical: 12, alignItems: 'center' },
-  shareLinkTxt: { color: colors.primary, fontSize: 13, fontWeight: '600' },
+
 
   navRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 },
   navRowText: { color: colors.textPrimary, fontSize: 14, fontWeight: '500' },

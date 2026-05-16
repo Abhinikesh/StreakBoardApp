@@ -2,7 +2,7 @@
  * src/lib/xpLevels.js
  *
  * Shared XP level config — used by ProfileScreen, DashboardScreen,
- * XpDetailScreen, LeaderboardScreen, and PublicProfileScreen.
+ * XpDetailScreen, and LeaderboardScreen.
  * Keep in sync with backend/lib/xp.js LEVELS.
  */
 
@@ -61,6 +61,5 @@ export const XP_RULES = [
   { label: '14-day streak',             xp: '+200', icon: '🔥' },
   { label: '30-day streak (& +30/30)',  xp: '+500', icon: '🔥' },
   { label: 'First habit created',       xp: '+20',  icon: '🌱' },
-  { label: 'Add a friend',              xp: '+10',  icon: '👥' },
   { label: '7-day login streak',        xp: '+75',  icon: '📅' },
 ];

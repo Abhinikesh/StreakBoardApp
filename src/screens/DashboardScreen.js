@@ -22,7 +22,7 @@ import * as SecureStore from 'expo-secure-store';
 import api from '../lib/axios';
 import { playTickSound, playCrossSound, playStreakMilestoneSound } from '../lib/sound';
 import { markUserActive } from '../lib/reengagement';
-import { triggerComebackIfEligible, markComebackLoggedToday } from '../lib/comeback';
+import { triggerComebackIfEligible, markComebackLoggedToday, recordPreviousStreak } from '../lib/comeback';
 import { useTheme } from '../context/ThemeContext';
 import { getLevelInfo, getLevelIcon } from '../lib/xpLevels';
 import { useOffline } from '../context/OfflineContext';
@@ -46,14 +46,24 @@ import WidgetTipCard from '../components/WidgetTipCard';
 
 // ─── Emoji / color pickers ────────────────────────────────────────────────────
 const EMOJI_OPTIONS = [
-  '💧', '🏃', '📚', '🧘', '💪', '🥗',
-  '😴', '☀️', '✍️', '🎯', '🎨', '🚫',
+  // Health & Fitness
+  '🏃', '🚴', '🧘', '💪', '🏋️', '🤸', '🏄', '🚶',
+  // Mind & Learning
+  '📚', '✍️', '🎯', '🧠', '📖', '🎨', '🎥', '🎭',
+  // Health & Body
+  '💧', '🥗', '😴', '☀️', '🚒', '📆', '💊', '🧪',
+  // Lifestyle
+  '☕', '🍎', '🥤', '🌿', '🍙', '🧹', '💻', '📝',
+  // Finance & Habits
+  '💰', '📱', '🚬', '🔥', '⭐', '❤️', '🙏', '🌙',
+  // Classic
+  '📌', '🌟', '🚀', '📸',
 ];
 const COLOR_OPTIONS = [
   '#10b981', '#7c3aed', '#ef4444', '#f59e0b',
   '#3b82f6', '#ec4899', '#14b8a6', '#f97316',
 ];
-const PERIOD_OPTIONS = [30, 60, 90];
+
 
 const HABIT_SUGGESTIONS = [
   { name: 'DSA Practice', icon: '💻' },
@@ -154,27 +164,22 @@ export default function DashboardScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newHabit, setNewHabit] = useState({
-    name: '', icon: '💧', colorHex: '#10b981', trackingPeriod: 30,
+    name: '', icon: '💧', colorHex: '#10b981',
   });
   const [creating, setCreating] = useState(false);
   const [selectedSuggestion, setSelectedSuggestion] = useState(null);
-  const [showNoteModal, setShowNoteModal] = useState(false);
-  const [noteModalHabit, setNoteModalHabit] = useState(null);
-  const [noteText, setNoteText] = useState('');
-  const [noteSaving, setNoteSaving] = useState(false);
-  const [noteFocused, setNoteFocused] = useState(false);
-  const [customDays, setCustomDays] = useState('');
-  const [showCustomInput, setShowCustomInput] = useState(false);
+
+
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [userAvatar, setUserAvatar] = useState(null);
-  const [showNoteSuccess, setShowNoteSuccess] = useState(false);
+
   const [comebackBanner, setComebackBanner] = useState(null);
   // XP / Level state
   const [xpData, setXpData] = useState({ totalXp: 0, currentLevel: 1, levelName: 'Beginner', progress: 0, xpToNext: 200 });
   const [showLevelUp, setShowLevelUp] = useState(false);
   const [levelUpInfo, setLevelUpInfo] = useState({ level: 1, name: 'Beginner' });
   const [shieldCount, setShieldCount] = useState(0);
-  const [weeklyChallenge, setWeeklyChallenge] = useState(null); // { challenge, progress, completed, rank }
+
   const levelUpAnim = useRef(new Animated.Value(0)).current;
   const progressAnim = useRef(new Animated.Value(0)).current;
   const bannerAnim = useRef(new Animated.Value(0)).current;
@@ -229,10 +234,7 @@ export default function DashboardScreen({ navigation }) {
       // Write widget data in background (non-blocking)
       writeWidgetData({ habits: activeHabits, habitLogs }).catch(() => { });
 
-      // Weekly challenge — non-blocking
-      api.get('/api/weekly-challenge/my-progress')
-        .then(r => { if (r.data) setWeeklyChallenge(r.data); })
-        .catch(() => { });
+
 
       // Fetch all logs in parallel
       const logResults = await Promise.all(
@@ -392,6 +394,7 @@ export default function DashboardScreen({ navigation }) {
         // ── Comeback detection ───────────────────────────────────────────
         // Trigger only when: this is 'done', was the FIRST log today across all
         // habits, AND all computed streaks were 0 before this log.
+        await recordPreviousStreak(oldStreak);
         if (status === 'done' && wasFirstLogToday && wasAllZeroStreak) {
           triggerComebackIfEligible().then((banner) => {
             if (banner) {
@@ -497,31 +500,23 @@ export default function DashboardScreen({ navigation }) {
       Alert.alert('Required', 'Please enter a habit name.');
       return;
     }
-    const finalDays = showCustomInput ? (parseInt(customDays) || 0) : newHabit.trackingPeriod;
-    if (!finalDays || isNaN(finalDays) || finalDays < 1 || finalDays > 365) {
-      Alert.alert('Invalid', 'Please enter valid days (1–365)');
-      return;
-    }
     setCreating(true);
     try {
       await api.post('/api/habits', {
         name: newHabit.name.trim(),
         icon: newHabit.icon,
         colorHex: newHabit.colorHex,
-        trackingPeriod: finalDays,
       });
       setShowAddModal(false);
       setSelectedSuggestion(null);
-      setNewHabit({ name: '', icon: '💧', colorHex: '#10b981', trackingPeriod: 30 });
-      setCustomDays('');
-      setShowCustomInput(false);
+      setNewHabit({ name: '', icon: '💧', colorHex: '#10b981' });
       await fetchAll();
     } catch (err) {
       Alert.alert('Error', err.response?.data?.message || 'Failed to create habit.');
     } finally {
       setCreating(false);
     }
-  }, [newHabit, fetchAll, showCustomInput, customDays]);
+  }, [newHabit, fetchAll]);
 
   // ── Save note ──────────────────────────────────────────────────────────────
   const handleSaveNote = useCallback(async () => {
@@ -617,7 +612,7 @@ export default function DashboardScreen({ navigation }) {
 
       {/* ── Navbar ── */}
       <View style={styles.navbar}>
-        <Text style={styles.navbarBrand}>🔥 StreakBoard</Text>
+        <Text style={styles.navbarBrand}>🔥 HabitBoard</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           {shieldCount > 0 && (
             <View style={[styles.xpPill, { backgroundColor: '#0e7a4422', borderColor: '#22c55e55' }]}>
@@ -822,119 +817,87 @@ export default function DashboardScreen({ navigation }) {
               const isDone = todayLog?.status === 'done';
               const isMissed = todayLog?.status === 'missed';
               return (
-                <View style={styles.habitCard}>
-                  <View style={[styles.accentBar, { backgroundColor: habit.colorHex || colors.primary }]} />
-                  <View style={styles.habitMiddle}>
-                    <View style={styles.habitNameRow}>
-                      <Text style={styles.habitIcon}>{habit.icon}</Text>
-                      <Text style={styles.habitName} numberOfLines={1}>{habit.name}</Text>
-                      {habit.reminderEnabled && <Text style={styles.reminderBadge}>⏰</Text>}
+                <TouchableOpacity
+                  activeOpacity={1}
+                  onLongPress={() => {
+                    Alert.alert(
+                      'Delete Habit',
+                      `Delete "${habit.name}"? This will permanently remove all its data and streak.`,
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        {
+                          text: 'Delete', style: 'destructive',
+                          onPress: async () => {
+                            try {
+                              await api.delete(`/api/habits/${habit._id}`);
+                              setHabits(prev => prev.filter(h => h._id !== habit._id));
+                            } catch (e) {
+                              Alert.alert('Error', e.response?.data?.message || 'Could not delete habit.');
+                            }
+                          },
+                        },
+                      ],
+                    );
+                  }}
+                  delayLongPress={500}
+                >
+                  <View style={styles.habitCard}>
+                    <View style={[styles.accentBar, { backgroundColor: habit.colorHex || colors.primary }]} />
+                    <View style={styles.habitMiddle}>
+                      <View style={styles.habitNameRow}>
+                        <Text style={styles.habitIcon}>{habit.icon}</Text>
+                        <Text style={styles.habitName} numberOfLines={1}>{habit.name}</Text>
+                        {habit.reminderEnabled && <Text style={styles.reminderBadge}>⏰</Text>}
+                      </View>
+                      <View style={styles.habitStreakRow}>
+                        {streak > 0 ? (
+                          <>
+                            <Text style={styles.streakFire}>🔥</Text>
+                            <Text style={styles.streakText}>{streak} day streak</Text>
+                          </>
+                        ) : (
+                          <Text style={styles.streakZero}>Start your streak today</Text>
+                        )}
+                      </View>
                     </View>
-                    <View style={styles.habitStreakRow}>
-                      {streak > 0 ? (
-                        <>
-                          <Text style={styles.streakFire}>🔥</Text>
-                          <Text style={styles.streakText}>{streak} day streak</Text>
-                        </>
-                      ) : (
-                        <Text style={styles.streakZero}>Start your streak today</Text>
-                      )}
+                    <View style={styles.habitActions}>
+                      <TouchableOpacity
+                        style={[styles.actionBtn, isDone && styles.actionBtnDone]}
+                        activeOpacity={0.75}
+                        onPress={() => handleLogAction(habit, 'done')}
+                      >
+                        <Text style={[styles.actionBtnText, isDone && styles.actionBtnTextActive]}>✓</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.actionBtn, isMissed && styles.actionBtnMissed]}
+                        activeOpacity={0.75}
+                        onPress={() => handleLogAction(habit, 'missed')}
+                      >
+                        <Text style={[styles.actionBtnText, isMissed && styles.actionBtnTextActive]}>✗</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.iconBtn}
+                        activeOpacity={0.75}
+                        onPress={() => handleOpenReminder(habit)}
+                      >
+                        <Text style={styles.iconBtnText}>🔔</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.iconBtn}
+                        activeOpacity={0.75}
+                        onPress={() => navigation.navigate('Calendar', { habitId: habit._id })}
+                      >
+                        <Text style={styles.iconBtnText}>📅</Text>
+                      </TouchableOpacity>
                     </View>
                   </View>
-                  <View style={styles.habitActions}>
-                    <TouchableOpacity
-                      style={[styles.actionBtn, isDone && styles.actionBtnDone]}
-                      activeOpacity={0.75}
-                      onPress={() => handleLogAction(habit, 'done')}
-                    >
-                      <Text style={[styles.actionBtnText, isDone && styles.actionBtnTextActive]}>✓</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.actionBtn, isMissed && styles.actionBtnMissed]}
-                      activeOpacity={0.75}
-                      onPress={() => handleLogAction(habit, 'missed')}
-                    >
-                      <Text style={[styles.actionBtnText, isMissed && styles.actionBtnTextActive]}>✗</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.iconBtn}
-                      activeOpacity={0.75}
-                      onPress={async () => {
-                        let savedNote = todayLog?.note || '';
-                        if (!savedNote) {
-                          try {
-                            const local = await AsyncStorage.getItem(`note_${habit._id}_${todayStr()}`);
-                            if (local) savedNote = local;
-                          } catch (_) { }
-                        }
-                        setNoteText(savedNote);
-                        setNoteModalHabit(habit);
-                        setShowNoteModal(true);
-                      }}
-                    >
-                      <Text style={styles.iconBtnText}>📝</Text>
-                    </TouchableOpacity>
-                    {/* "..." overflow: opens a small action menu for ⏰ and 📅 */}
-                    <TouchableOpacity
-                      style={styles.iconBtn}
-                      activeOpacity={0.75}
-                      onPress={() => setOverflowHabit(habit)}
-                    >
-                      <Text style={[styles.iconBtnText, { letterSpacing: 1 }]}>•••</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
+                </TouchableOpacity>
               );
             }}
           />
         )}
 
-        {/* ── Weekly Challenge Card ── */}
-        {weeklyChallenge?.challenge && (() => {
-          const wc = weeklyChallenge.challenge;
-          const pct = Math.min(1, (weeklyChallenge.progress || 0) / (wc.targetValue || 1));
-          return (
-            <TouchableOpacity
-              style={styles.wcCard}
-              activeOpacity={0.87}
-              onPress={() => navigation.navigate('WeeklyChallenge')}
-            >
-              <View style={styles.wcCardHeader}>
-                <View style={styles.wcBadge}>
-                  <Text style={styles.wcBadgeTxt}>WEEKLY CHALLENGE</Text>
-                </View>
-                {wc.daysRemaining != null && (
-                  <Text style={styles.wcDaysLeft}>{wc.daysRemaining}d left</Text>
-                )}
-              </View>
 
-              <Text style={styles.wcTitle}>{wc.title}</Text>
-              <Text style={styles.wcDesc} numberOfLines={2}>{wc.description}</Text>
-
-              {/* Progress bar */}
-              <View style={styles.wcBarTrack}>
-                <View style={[styles.wcBarFill, { width: `${Math.round(pct * 100)}%` }]} />
-              </View>
-              <View style={styles.wcBarRow}>
-                <Text style={styles.wcBarLabel}>
-                  {weeklyChallenge.progress} / {wc.targetValue}{' '}
-                  {wc.type === 'daily_log' ? 'days' :
-                    wc.type === 'streak' ? 'day streak' :
-                      wc.type === 'early_bird' ? 'early days' : 'days'}
-                </Text>
-                <Text style={styles.wcParticipants}>
-                  {(wc.participantCount || 0).toLocaleString()} participants
-                </Text>
-              </View>
-
-              {weeklyChallenge.completed && (
-                <View style={styles.wcCompletedBadge}>
-                  <Text style={styles.wcCompletedTxt}>✓ Completed · +150 XP</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          );
-        })()}
       </ScrollView>
 
       {/* ── Section 5: Floating add button ── */}
@@ -1006,7 +969,7 @@ export default function DashboardScreen({ navigation }) {
         visible={showAddModal}
         animationType="slide"
         transparent
-        onRequestClose={() => { setShowAddModal(false); setSelectedSuggestion(null); setCustomDays(''); setShowCustomInput(false); }}
+        onRequestClose={() => { setShowAddModal(false); setSelectedSuggestion(null); }}
       >
         <View style={styles.modalBackdrop}>
           <View style={styles.modalSheet}>
@@ -1014,7 +977,7 @@ export default function DashboardScreen({ navigation }) {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>New Habit</Text>
               <TouchableOpacity
-                onPress={() => { setShowAddModal(false); setSelectedSuggestion(null); setCustomDays(''); setShowCustomInput(false); }}
+                onPress={() => { setShowAddModal(false); setSelectedSuggestion(null); }}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
                 <Text style={styles.modalClose}>✕</Text>
@@ -1091,66 +1054,7 @@ export default function DashboardScreen({ navigation }) {
                 ))}
               </View>
 
-              {/* 4. Tracking period */}
-              <Text style={styles.fieldLabel}>Track for</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-                {[30, 60, 90].map((days) => (
-                  <TouchableOpacity
-                    key={days}
-                    onPress={() => { setNewHabit((p) => ({ ...p, trackingPeriod: days })); setShowCustomInput(false); setCustomDays(''); }}
-                    style={{
-                      paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20,
-                      backgroundColor: newHabit.trackingPeriod === days && !showCustomInput
-                        ? colors.primary : 'transparent',
-                      borderWidth: 1.5,
-                      borderColor: newHabit.trackingPeriod === days && !showCustomInput
-                        ? colors.primary : colors.border,
-                    }}
-                  >
-                    <Text style={{
-                      color: newHabit.trackingPeriod === days && !showCustomInput ? '#ffffff' : colors.textSecondary,
-                      fontWeight: '600',
-                    }}>{days} days</Text>
-                  </TouchableOpacity>
-                ))}
-                <TouchableOpacity
-                  onPress={() => { setShowCustomInput(true); setNewHabit((p) => ({ ...p, trackingPeriod: 0 })); }}
-                  style={{
-                    paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20,
-                    backgroundColor: showCustomInput ? colors.primary : 'transparent',
-                    borderWidth: 1.5,
-                    borderColor: showCustomInput ? colors.primary : colors.border,
-                  }}
-                >
-                  <Text style={{ color: showCustomInput ? '#ffffff' : colors.textSecondary, fontWeight: '600' }}>Custom</Text>
-                </TouchableOpacity>
-              </View>
-
-              {showCustomInput && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                  <TextInput
-                    keyboardType="number-pad"
-                    placeholder="Enter days (e.g. 45)"
-                    placeholderTextColor={colors.textMuted}
-                    value={customDays}
-                    onChangeText={(val) => {
-                      setCustomDays(val);
-                      const num = parseInt(val);
-                      if (num > 0 && num <= 365) setNewHabit((p) => ({ ...p, trackingPeriod: num }));
-                    }}
-                    style={{
-                      flex: 1, borderWidth: 1.5, borderColor: colors.primary,
-                      borderRadius: 12, padding: 12, fontSize: 15,
-                      color: colors.textPrimary,
-                      backgroundColor: colors.bg,
-                    }}
-                    maxLength={3}
-                  />
-                  <Text style={{ color: colors.textSecondary, fontSize: 13 }}>days (max 365)</Text>
-                </View>
-              )}
-
-              {/* 5. Create button */}
+              {/* 4. Create button */}
               <TouchableOpacity
                 style={[styles.createBtn, creating && { opacity: 0.6 }]}
                 activeOpacity={0.85}
@@ -1168,63 +1072,6 @@ export default function DashboardScreen({ navigation }) {
         </View>
       </Modal>
 
-      {/* ── Note Modal ── */}
-      <Modal
-        visible={showNoteModal}
-        animationType="slide"
-        transparent
-        onRequestClose={() => { setShowNoteModal(false); setNoteText(''); setNoteModalHabit(null); }}
-      >
-        <View style={styles.noteModalBackdrop}>
-          <View style={styles.noteModalSheet}>
-            <TouchableOpacity
-              style={styles.noteModalCloseBtn}
-              onPress={() => { setShowNoteModal(false); setNoteText(''); setNoteModalHabit(null); }}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Text style={styles.noteModalCloseTxt}>✕</Text>
-            </TouchableOpacity>
-            <Text style={styles.noteModalTitle}>{noteModalHabit?.icon} {noteModalHabit?.name}</Text>
-            <Text style={styles.noteModalSub}>Note for today</Text>
-            <TextInput
-              style={[styles.noteInput, noteFocused && styles.noteInputFocused]}
-              value={noteText}
-              onChangeText={setNoteText}
-              placeholder="How did it go today?"
-              placeholderTextColor={colors.textMuted}
-              multiline
-              textAlignVertical="top"
-              fontSize={15}
-              maxLength={500}
-              onFocus={() => setNoteFocused(true)}
-              onBlur={() => setNoteFocused(false)}
-            />
-            <TouchableOpacity
-              style={[styles.noteSaveBtn, noteSaving && { opacity: 0.6 }]}
-              onPress={handleSaveNote}
-              disabled={noteSaving}
-              activeOpacity={0.85}
-            >
-              {noteSaving
-                ? <ActivityIndicator color={colors.textPrimary} />
-                : <Text style={styles.noteSaveBtnTxt}>Save Note</Text>}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* ── Note saved toast ── */}
-      {showNoteSuccess && (
-        <View style={{
-          position: 'absolute', bottom: 110, alignSelf: 'center',
-          backgroundColor: '#22C55E', paddingHorizontal: 24,
-          paddingVertical: 12, borderRadius: 24, zIndex: 999,
-          elevation: 10,
-          shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 6,
-        }}>
-          <Text style={{ color: 'white', fontWeight: '700', fontSize: 14 }}>✓ Note saved</Text>
-        </View>
-      )}
 
       {/* ── Level-Up Modal overlay ── */}
       <Modal visible={showLevelUp} transparent animationType="none" onRequestClose={() => setShowLevelUp(false)}>

@@ -2,31 +2,15 @@
  * src/lib/pushNotifications.js
  *
  * Registers the device for Expo push notifications and persists the token
- * to the StreakBoard backend. The backend uses this token when sending
- * push notifications for new direct messages, friend requests, etc.
+ * to the HabitBoard backend. The backend uses this token when sending
+ * push notifications for habit reminders and streak alerts.
  *
  * Call registerAndSavePushToken() once after login / on app launch.
  */
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
 import api from './axios';
 
 const EXPO_PROJECT_ID = '38630291-cf31-48aa-9431-1ad2adfe778e';
-
-// ── Android channel for direct messages ────────────────────────────────────
-async function ensureDMChannel() {
-  if (Platform.OS !== 'android') return;
-  try {
-    await Notifications.setNotificationChannelAsync('direct-messages', {
-      name: 'Direct Messages',
-      importance: Notifications.AndroidImportance.MAX,
-      sound: 'default',
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#7c3aed',
-      showBadge: true,
-    });
-  } catch (_) {}
-}
 
 /**
  * Requests push permission, retrieves the Expo push token, and saves it
@@ -39,7 +23,6 @@ async function ensureDMChannel() {
  */
 export async function registerAndSavePushToken() {
   try {
-    await ensureDMChannel();
 
     // Request / confirm permission
     const { status: existing } = await Notifications.getPermissionsAsync();

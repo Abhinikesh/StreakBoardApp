@@ -1,7 +1,7 @@
 /**
  * scripts/gen_sounds.js
  *
- * Generates three satisfying chime/ding WAV files for StreakBoard habit sounds.
+ * Generates three satisfying chime/ding WAV files for HabitBoard habit sounds.
  * Run with: node scripts/gen_sounds.js
  *
  * Technique:
@@ -164,7 +164,7 @@ const streakSound = concat([
 // ─────────────────────────────────────────────────────────────────────────────
 if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
 
-console.log('\nGenerating StreakBoard sound effects...\n');
+console.log('\nGenerating HabitBoard sound effects...\n');
 writeWav('tick.wav',             tickSound);
 writeWav('cross.wav',            crossSound);
 writeWav('streak_increase.wav',  streakSound);

@@ -36,7 +36,7 @@ export default function WidgetTipCard({ onHowToAdd }) {
       </TouchableOpacity>
 
       <Text style={styles.emoji}>📱</Text>
-      <Text style={[styles.title, { color: colors.textPrimary }]}>Add the StreakBoard Widget</Text>
+      <Text style={[styles.title, { color: colors.textPrimary }]}>Add the HabitBoard Widget</Text>
       <Text style={[styles.body, { color: colors.textMuted }]}>
         See your streak and today's progress right on your home screen — no need to open the app.
       </Text>
